@@ -1,9 +1,9 @@
 {
-  "name": "ccpretty",
+  "name": "@hais/ccpretty",
   "version": "1.0.0",
   "main": "dist/index.js",
   "bin": {
-    "ccpretty": "./dist/index.js"
+    "ccpretty": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -18,7 +18,7 @@
     "pretty",
     "cli"
   ],
-  "author": "",
+  "author": "Hais",
   "license": "ISC",
   "description": "A command-line tool to format JSON log lines into human-readable messages",
   "devDependencies": {
@@ -29,5 +29,13 @@
     "@axync/extract-json": "^1.1.1",
     "boxen": "^8.0.1",
     "picocolors": "^1.1.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hais/ccpretty.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Hais/ccpretty/issues"
+  },
+  "homepage": "https://github.com/Hais/ccpretty#readme"
 }

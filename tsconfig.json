@@ -10,10 +10,17 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": false,
+    "moduleResolution": "node",
+    "allowJs": false,
+    "composite": false,
+    "noEmitOnError": true,
+    "incremental": false
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/index.ts"],
+  "exclude": ["node_modules", "dist"],
+  "tsBuildInfoFile": "./dist/.tsbuildinfo"
 }
