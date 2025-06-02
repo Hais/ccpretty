@@ -1,0 +1,33 @@
+{
+  "name": "ccpretty",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "bin": {
+    "ccpretty": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "ccpretty": "node dist/index.js"
+  },
+  "keywords": [
+    "log",
+    "formatter",
+    "json",
+    "pretty",
+    "cli"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "A command-line tool to format JSON log lines into human-readable messages",
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@axync/extract-json": "^1.1.1",
+    "boxen": "^8.0.1",
+    "picocolors": "^1.1.1"
+  }
+}
