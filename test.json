@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"id":"test-123","type":"message","role":"assistant","model":"claude-3-5-sonnet","content":[{"type":"text","text":"Hello World from Claude\!"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":20},"ttftMs":123},"session_id":"test-session"}
