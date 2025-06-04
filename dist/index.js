@@ -42,18 +42,25 @@ const extract_json_1 = require("@axync/extract-json");
 const web_api_1 = require("@slack/web-api");
 const models_1 = require("./models");
 const formatters_1 = require("./formatters");
-// Get Slack configuration from environment variables and arguments
-function getSlackConfig() {
+const message_queue_1 = require("./message-queue");
+const message_reducer_1 = require("./message-reducer");
+// Get configuration from environment variables and arguments
+function getConfig() {
     let threadTs = process.env.CCPRETTY_SLACK_THREAD_TS;
     // Check for --resume-slack-thread argument
     const resumeArg = process.argv.includes('--resume-slack-thread');
     if (resumeArg && !threadTs) {
         threadTs = readSlackThreadFromFile();
     }
+    // Check for --queue flag to enable queue-based processing
+    const useQueue = process.argv.includes('--queue');
     return {
-        token: process.env.CCPRETTY_SLACK_TOKEN,
-        channel: process.env.CCPRETTY_SLACK_CHANNEL,
-        threadTs: threadTs,
+        slack: {
+            token: process.env.CCPRETTY_SLACK_TOKEN,
+            channel: process.env.CCPRETTY_SLACK_CHANNEL,
+            threadTs: threadTs,
+        },
+        useQueue
     };
 }
 // Read Slack thread timestamp from temporary file
@@ -726,7 +733,8 @@ function formatLogEntry(data) {
     return type;
 }
 async function main() {
-    const { token, channel, threadTs } = getSlackConfig();
+    const config = getConfig();
+    const { slack: { token, channel, threadTs }, useQueue } = config;
     // Initialize Slack configuration if token and channel are provided
     let slackConfig = null;
     if (token && channel) {
@@ -741,6 +749,30 @@ async function main() {
         console.error('Slack integration active:');
         console.error(`  Channel: ${channel}`);
         console.error(`  Thread: ${threadTs ? threadTs : 'New thread will be created'}`);
+    }
+    // Initialize queue-based processing if enabled
+    let messageQueue = null;
+    let messageReducer = null;
+    if (useQueue) {
+        console.error('Queue-based processing enabled');
+        messageReducer = new message_reducer_1.MessageReducer();
+        messageQueue = new message_queue_1.MessageQueue((groups) => {
+            if (messageReducer) {
+                const processedMessages = messageReducer.reduceGroups(groups);
+                for (const processed of processedMessages) {
+                    console.log(processed.content);
+                    // Post to Slack if configured
+                    if (slackConfig && groups.length > 0) {
+                        // Convert back to LogEntry for Slack posting
+                        const firstMessage = groups[0].messages[0];
+                        if (isSignificantEvent(firstMessage.logEntry)) {
+                            postToSlack(slackConfig, firstMessage.logEntry);
+                        }
+                    }
+                }
+            }
+        });
+        messageQueue.start();
     }
     const rl = readline.createInterface({
         input: process.stdin,
@@ -805,6 +837,10 @@ async function main() {
         if (buffer) {
             await processJsonBuffer(buffer);
         }
+        // Stop queue processing if enabled
+        if (messageQueue) {
+            messageQueue.stop();
+        }
         process.exit(0);
     });
     async function processJsonBuffer(text) {
@@ -815,14 +851,21 @@ async function main() {
                 console.log(text);
                 return;
             }
-            // Format and print each JSON object found
+            // Process each JSON object found
             for (const obj of jsonObjects) {
                 try {
                     const logEntry = obj;
-                    console.log(formatLogEntry(logEntry));
-                    // Post significant events to Slack if configured
-                    if (slackConfig && isSignificantEvent(logEntry)) {
-                        await postToSlack(slackConfig, logEntry);
+                    if (useQueue && messageQueue) {
+                        // Queue-based processing
+                        messageQueue.enqueue(logEntry);
+                    }
+                    else {
+                        // Original immediate processing
+                        console.log(formatLogEntry(logEntry));
+                        // Post significant events to Slack if configured
+                        if (slackConfig && isSignificantEvent(logEntry)) {
+                            await postToSlack(slackConfig, logEntry);
+                        }
                     }
                 }
                 catch (entryError) {

@@ -6,6 +6,8 @@
 
 A CLI tool that formats JSON log lines from ccpretty sessions into human-readable output with colored boxes and special formatting. Optionally integrates with Slack to post real-time updates to a channel.
 
+📚 **[Full Documentation](./docs/)** | 🏗️ **[Architecture](./docs/architecture.md)** | 📋 **[Message Formats](./docs/message-formats.md)**
+
 ## Features
 
 - **Pretty Formatting**: Transforms JSON logs into colored, boxed output
@@ -13,6 +15,10 @@ A CLI tool that formats JSON log lines from ccpretty sessions into human-readabl
 - **Special TodoWrite Formatting**: Displays todo lists with emoji status indicators
 - **Slack Integration**: Posts updates to Slack threads with workflow status reactions
 - **Streaming Support**: Processes multi-line JSON objects in real-time
+- **Queue Mode** (NEW): Enable with `--queue` flag for:
+  - Tool use/result pairing - shows complete tool executions
+  - Message deduplication - filters redundant messages
+  - Better UX - less fragmented output
 
 ## Installation
 
@@ -45,6 +51,9 @@ claude -p "Hello world" --output-format stream-json --verbose | ccpretty
 
 # Or resume the last thread automatically
 claude -p "Hello world" --output-format stream-json --verbose  | ccpretty --resume-slack-thread
+
+# NEW: Queue-based processing with tool pairing and deduplication
+claude -p "Hello world" --output-format stream-json --verbose | ccpretty --queue
 ```
 
 ## Slack Integration
@@ -93,6 +102,17 @@ npm run build
 
 # Test locally
 npm run ccpretty
+
+# Run tests
+npm test
+
+# Run specific test suites
+npm test -- tests/queue-behavior.test.ts     # Queue functionality tests
+npm test -- tests/fixture-scenarios.test.ts # Realistic workflow scenarios from fixtures
+npm test -- tests/workflow-scenarios.test.ts # Complex multi-step workflows  
+npm test -- tests/message-reducer.test.ts   # State transformation tests
+npm test -- tests/formatters.test.ts        # Message formatting tests
+npm test -- tests/slack.test.ts             # Slack integration tests
 ```
 
 ## Message Types

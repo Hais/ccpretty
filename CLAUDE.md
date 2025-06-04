@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `export CCPRETTY_SLACK_CHANNEL=#channel-name`
   - `export CCPRETTY_SLACK_THREAD_TS=1234567890.123456` (optional, to post to existing thread)
 - **Resume Slack Thread**: `ccpretty --resume-slack-thread` - Resume posting to the last used thread
+- **Queue Processing**: `ccpretty --queue` - Enable experimental queue-based processing with tool pairing and deduplication
 
 ## Architecture
 
@@ -22,14 +23,27 @@ This is a CLI tool that formats JSON log lines from Claude Code sessions into hu
 
 - `src/index.ts` - Main CLI application with stdin processing and JSON parsing
 - `src/models.ts` - TypeScript type definitions for Claude Code message formats
+- `src/formatters.ts` - Message formatting functions with colored output
+- `src/slack.ts` - Slack integration utilities
+- `src/message-queue.ts` - Queue-based message processing (experimental)
+- `src/message-reducer.ts` - Message deduplication and tool pairing logic
 
 ### Data Flow
 
+#### Standard Mode (Default)
 1. Reads streaming JSON from stdin line by line
 2. Uses brace counting to detect complete JSON objects across multiple lines
 3. Extracts JSON using `@axync/extract-json` library
 4. Type-checks and formats based on message type (assistant, user, system, result)
 5. Outputs colored, boxed formatting using `boxen` and `picocolors`
+
+#### Queue Mode (--queue flag)
+1. Messages are queued for processing instead of immediate output
+2. Queue is sampled every 500ms to group related messages
+3. Tool_use requests are paired with tool_result responses
+4. Duplicate messages are filtered out
+5. Combined tool execution summaries show complete workflow
+6. Provides better UX with less fragmented output
 
 ### Message Types
 
