@@ -590,7 +590,8 @@ async function postToSlack(slackConfig: SlackConfig, data: LogEntry): Promise<vo
     }
     
     // Special deduplication for result messages that match the last assistant message
-    if (messageType === 'result' && data.result && slackConfig.lastAssistantText) {
+    // Only deduplicate if the result text is substantial (more than just status)
+    if (messageType === 'result' && data.result && slackConfig.lastAssistantText && data.result.length > 50) {
       const normalizedResult = data.result.trim();
       const normalizedAssistant = slackConfig.lastAssistantText.trim();
       if (normalizedResult === normalizedAssistant) {

@@ -1,4 +1,8 @@
-# ccpretty
+# Claude Code Pretty
+
+<p align="left">
+  <img src="assets/logo.png" alt="Claude Code Pretty Logo" width="250" height="250" style="max-width:250px;max-height:250px;">
+</p>
 
 A CLI tool that formats JSON log lines from ccpretty sessions into human-readable output with colored boxes and special formatting. Optionally integrates with Slack to post real-time updates to a channel.
 
