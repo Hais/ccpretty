@@ -20,7 +20,7 @@
     "noEmitOnError": true,
     "incremental": false
   },
-  "include": ["src/index.ts"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"],
   "tsBuildInfoFile": "./dist/.tsbuildinfo"
 }
