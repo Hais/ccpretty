@@ -174,6 +174,9 @@ class MessageReducer {
         if (input.offset) {
             params += `\n📍 Offset: ${input.offset}`;
         }
+        if (input.timeout) {
+            params += `\n⏱️ Timeout: ${input.timeout}ms`;
+        }
         return params;
     }
     /**

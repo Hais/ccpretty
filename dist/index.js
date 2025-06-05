@@ -494,12 +494,40 @@ async function updateToolUseMessage(slackConfig, messageTs, toolName, toolResult
         const isError = toolResult.is_error || false;
         const statusIcon = isError ? '🔴' : '🟢';
         const statusText = isError ? 'Failed' : 'Completed';
-        // Simple text update - replace "Running..." with completion status
-        // This approach doesn't require channels:history permission
+        // Create blocks for the updated status
+        const blocks = [
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: `🔧 ${toolName}`
+                }
+            },
+            {
+                type: "context",
+                elements: [
+                    {
+                        type: "mrkdwn",
+                        text: `${statusIcon} *${statusText}*`
+                    }
+                ]
+            }
+        ];
+        // If there's an error message, include it
+        if (isError && toolResult.content) {
+            blocks.push({
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: `⚠️ Error: ${toolResult.content}`
+                }
+            });
+        }
         await slackConfig.client.chat.update({
             channel: slackConfig.channel,
             ts: messageTs,
-            text: `${statusIcon} *${toolName} ${statusText}*`
+            text: `${statusIcon} *${toolName} ${statusText}*`,
+            blocks: blocks
         });
     }
     catch (error) {
@@ -536,18 +564,13 @@ async function postToSlack(slackConfig, data) {
                 return; // Skip duplicate result message
             }
         }
-        // Use text-only format for tool_use to avoid needing channels:history permission
-        const useTextOnly = messageType === 'tool_use';
         if (!slackConfig.threadTs) {
             // Create initial thread message
             const postParams = {
                 channel: slackConfig.channel,
                 text: messageText,
+                blocks: createSlackBlocks(data)
             };
-            // Add blocks for non-tool_use messages
-            if (!useTextOnly) {
-                postParams.blocks = createSlackBlocks(data);
-            }
             const result = await slackConfig.client.chat.postMessage(postParams);
             if (result.ts) {
                 slackConfig.threadTs = result.ts;
@@ -653,11 +676,8 @@ async function postToSlack(slackConfig, data) {
                 channel: slackConfig.channel,
                 text: messageText,
                 thread_ts: slackConfig.threadTs,
+                blocks: createSlackBlocks(data)
             };
-            // Add blocks for non-tool_use messages
-            if (!useTextOnly) {
-                postParams.blocks = createSlackBlocks(data);
-            }
             const result = await slackConfig.client.chat.postMessage(postParams);
             // Store last message info and track tool_use IDs
             if (result.ts) {
