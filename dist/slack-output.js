@@ -52,6 +52,56 @@ class SlackOutput {
         this.threadTs = config.threadTs;
         // Rate limit to 1 call per second to avoid Slack rate limits
         this.rateLimiter = new rate_limiter_1.RateLimiter(1);
+        // Initialize debug mode
+        this.debugLogPath = process.env.CCPRETTY_SLACK_DEBUG;
+        this.debugMode = !!this.debugLogPath;
+        if (this.debugMode) {
+            this.initializeDebugLog();
+        }
+    }
+    /**
+     * Initialize debug logging
+     */
+    initializeDebugLog() {
+        if (!this.debugLogPath)
+            return;
+        try {
+            // Ensure directory exists
+            const debugDir = path.dirname(this.debugLogPath);
+            if (!fs.existsSync(debugDir)) {
+                fs.mkdirSync(debugDir, { recursive: true });
+            }
+            // Write header to log file
+            const timestamp = new Date().toISOString();
+            const header = `\n=== CCPRETTY SLACK DEBUG SESSION STARTED AT ${timestamp} ===\n`;
+            fs.appendFileSync(this.debugLogPath, header);
+            console.log(`Slack debug logging enabled: ${this.debugLogPath}`);
+        }
+        catch (error) {
+            console.error('Failed to initialize Slack debug log:', error);
+            this.debugMode = false;
+        }
+    }
+    /**
+     * Log Slack API call to debug file
+     */
+    logSlackCall(method, payload, response) {
+        if (!this.debugMode || !this.debugLogPath)
+            return;
+        try {
+            const timestamp = new Date().toISOString();
+            const logEntry = {
+                timestamp,
+                method,
+                payload,
+                response: response ? { ts: response.ts, ok: response.ok } : undefined
+            };
+            const logLine = `${JSON.stringify(logEntry, null, 2)}\n`;
+            fs.appendFileSync(this.debugLogPath, logLine);
+        }
+        catch (error) {
+            // Silently ignore debug logging errors
+        }
     }
     /**
      * Output a reduced message to Slack
@@ -113,11 +163,14 @@ class SlackOutput {
         // Create or update the initial message
         const text = `*Session Started* (${this.sessionId})\n_Available tools: ${tools.join(', ')}_`;
         try {
-            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage({
+            const payload = {
                 channel: this.config.channel,
                 text,
                 thread_ts: this.threadTs
-            }));
+            };
+            this.logSlackCall('chat.postMessage', payload);
+            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(payload));
+            this.logSlackCall('chat.postMessage', payload, result);
             if (!this.threadTs && result.ts) {
                 this.threadTs = result.ts;
                 this.initialMessageTs = result.ts;
@@ -125,11 +178,14 @@ class SlackOutput {
             }
             // Add initial reaction
             if (this.initialMessageTs) {
-                await this.rateLimiter.execute(() => this.client.reactions.add({
+                const reactionPayload = {
                     channel: this.config.channel,
                     timestamp: this.initialMessageTs,
                     name: 'rocket'
-                }));
+                };
+                this.logSlackCall('reactions.add', reactionPayload);
+                const reactionResult = await this.rateLimiter.execute(() => this.client.reactions.add(reactionPayload));
+                this.logSlackCall('reactions.add', reactionPayload, reactionResult);
             }
         }
         catch (error) {
@@ -180,21 +236,27 @@ class SlackOutput {
         try {
             if (existingMessageTs) {
                 // Update existing message
-                await this.rateLimiter.execute(() => this.client.chat.update({
+                const updatePayload = {
                     channel: this.config.channel,
                     ts: existingMessageTs,
                     blocks,
                     text: `${toolName} ${toolStatus}`
-                }));
+                };
+                this.logSlackCall('chat.update', updatePayload);
+                const updateResult = await this.rateLimiter.execute(() => this.client.chat.update(updatePayload));
+                this.logSlackCall('chat.update', updatePayload, updateResult);
             }
             else {
                 // Post new message
-                const result = await this.rateLimiter.execute(() => this.client.chat.postMessage({
+                const postPayload = {
                     channel: this.config.channel,
                     thread_ts: this.threadTs,
                     blocks,
                     text: `${toolName} ${toolStatus}`
-                }));
+                };
+                this.logSlackCall('chat.postMessage', postPayload);
+                const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(postPayload));
+                this.logSlackCall('chat.postMessage', postPayload, result);
                 if (result.ts) {
                     this.toolMessages.set(toolId, result.ts);
                 }
@@ -421,11 +483,14 @@ class SlackOutput {
             combinedText = combinedText.substring(0, 2800) + '...';
         }
         try {
-            await this.rateLimiter.execute(() => this.client.chat.postMessage({
+            const payload = {
                 channel: this.config.channel,
                 thread_ts: this.threadTs,
                 text: combinedText
-            }));
+            };
+            this.logSlackCall('chat.postMessage', payload);
+            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(payload));
+            this.logSlackCall('chat.postMessage', payload, result);
             if (process.env.CCPRETTY_DEBUG) {
                 console.error('[SlackOutput] Successfully posted assistant message to Slack');
             }
@@ -466,14 +531,17 @@ class SlackOutput {
             this.toolMessages.set(tool.id, 'pending');
         }
         try {
-            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage({
+            const payload = {
                 channel: this.config.channel,
                 thread_ts: this.threadTs,
                 blocks,
                 text: this.pendingToolUses.length > 1 ?
                     `Running ${this.pendingToolUses.length} tools` :
                     `Running ${this.pendingToolUses[0]?.name || 'tool'}`
-            }));
+            };
+            this.logSlackCall('chat.postMessage', payload);
+            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(payload));
+            this.logSlackCall('chat.postMessage', payload, result);
             // Update all tool IDs with the message timestamp
             if (result.ts) {
                 for (const tool of this.pendingToolUses) {
@@ -492,14 +560,17 @@ class SlackOutput {
      */
     async postDivider() {
         try {
-            await this.rateLimiter.execute(() => this.client.chat.postMessage({
+            const payload = {
                 channel: this.config.channel,
                 thread_ts: this.threadTs,
                 blocks: [{
                         type: 'divider'
                     }],
                 text: '---'
-            }));
+            };
+            this.logSlackCall('chat.postMessage', payload);
+            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(payload));
+            this.logSlackCall('chat.postMessage', payload, result);
         }
         catch (error) {
             // Ignore divider errors
@@ -516,33 +587,86 @@ class SlackOutput {
         if (this.initialMessageTs) {
             try {
                 // Remove rocket
-                await this.rateLimiter.execute(() => this.client.reactions.remove({
+                const removePayload = {
                     channel: this.config.channel,
                     timestamp: this.initialMessageTs,
                     name: 'rocket'
-                }));
+                };
+                this.logSlackCall('reactions.remove', removePayload);
+                const removeResult = await this.rateLimiter.execute(() => this.client.reactions.remove(removePayload));
+                this.logSlackCall('reactions.remove', removePayload, removeResult);
                 // Add final status
-                await this.rateLimiter.execute(() => this.client.reactions.add({
+                const addPayload = {
                     channel: this.config.channel,
                     timestamp: this.initialMessageTs,
                     name: isSuccess ? 'white_check_mark' : 'warning'
-                }));
+                };
+                this.logSlackCall('reactions.add', addPayload);
+                const addResult = await this.rateLimiter.execute(() => this.client.reactions.add(addPayload));
+                this.logSlackCall('reactions.add', addPayload, addResult);
             }
             catch (error) {
                 // Ignore reaction errors
             }
         }
-        // Post summary
+        // Create result blocks
         const status = isSuccess ? '✅ Success' : '❌ Failed';
-        let summary = `*Task ${status}*\n`;
-        summary += `Duration: ${(response.duration_ms / 1000).toFixed(2)}s\n`;
-        summary += `Cost: $${response.cost_usd.toFixed(4)}\n`;
+        const fallbackText = `Task ${status} - Duration: ${(response.duration_ms / 1000).toFixed(2)}s, Cost: $${response.cost_usd.toFixed(4)}`;
+        const blocks = [
+            {
+                type: "header",
+                text: {
+                    type: "plain_text",
+                    text: `Task ${status}`,
+                    emoji: true
+                }
+            },
+            {
+                type: "section",
+                fields: [
+                    {
+                        type: "mrkdwn",
+                        text: `*⏱️ Duration:*\n${(response.duration_ms / 1000).toFixed(2)}s`
+                    },
+                    {
+                        type: "mrkdwn",
+                        text: `*🔄 API Time:*\n${(response.duration_api_ms / 1000).toFixed(2)}s`
+                    },
+                    {
+                        type: "mrkdwn",
+                        text: `*💬 Turns:*\n${response.num_turns}`
+                    },
+                    {
+                        type: "mrkdwn",
+                        text: `*💰 Cost:*\n$${response.cost_usd.toFixed(4)}`
+                    }
+                ]
+            }
+        ];
+        // Add result content if it exists
+        if (typeof response.result === 'string' && response.result.trim()) {
+            // Truncate long results for Slack
+            const resultText = response.result.length > 2000
+                ? response.result.substring(0, 1997) + '...'
+                : response.result;
+            blocks.push({
+                type: "section",
+                text: {
+                    type: "mrkdwn",
+                    text: resultText
+                }
+            });
+        }
         try {
-            await this.rateLimiter.execute(() => this.client.chat.postMessage({
+            const payload = {
                 channel: this.config.channel,
                 thread_ts: this.threadTs,
-                text: summary
-            }));
+                text: fallbackText,
+                blocks: blocks
+            };
+            this.logSlackCall('chat.postMessage', payload);
+            const result = await this.rateLimiter.execute(() => this.client.chat.postMessage(payload));
+            this.logSlackCall('chat.postMessage', payload, result);
         }
         catch (error) {
             console.error('Failed to post result to Slack:', error);

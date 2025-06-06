@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - See `.env.example` for available environment variables
 - **Resume Slack Thread**: `ccpretty --resume-slack-thread` - Resume posting to the last used thread
 - **Queue Processing**: `ccpretty --queue` - Enable experimental queue-based processing with tool pairing and deduplication
+- **Slack Debug Mode**: Set `export CCPRETTY_SLACK_DEBUG=/path/to/logfile` to log all Slack API calls to the specified file
 
 ## Architecture
 
@@ -81,3 +82,19 @@ When Slack environment variables are set, the tool automatically:
 Uses `@slack/web-api` for Slack communication. Required bot token permissions:
 - `chat:write` - To post and update messages
 - `reactions:write` - To add workflow status reactions
+
+#### Slack Debug Mode
+
+Set `CCPRETTY_SLACK_DEBUG=/path/to/logfile` to enable debug logging of all Slack API calls. Debug logs are written to the specified file and include:
+- Timestamps for each API call
+- Full request payloads sent to Slack
+- Response metadata (timestamps, success status)
+- All API methods: `chat.postMessage`, `chat.update`, `reactions.add`, `reactions.remove`
+
+Example usage:
+```bash
+export CCPRETTY_SLACK_DEBUG=./slack-debug.log
+ccpretty < claude-session.log
+```
+
+This is useful for debugging Slack integration issues or understanding the exact sequence of API calls.
