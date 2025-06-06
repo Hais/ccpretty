@@ -106,8 +106,9 @@ export class SlackOutput {
    * Output a reduced message to Slack
    */
   async output(reduced: ReducedMessage): Promise<void> {
-    const { message, metadata } = reduced;
-    const currentType = message.type;
+    try {
+      const { message, metadata } = reduced;
+      const currentType = message.type;
     
     // Debug log all messages
     if (process.env.CCPRETTY_DEBUG) {
@@ -154,6 +155,12 @@ export class SlackOutput {
     // Update last message type (only for postable types)
     if (isPostableType) {
       this.lastMessageType = currentType;
+    }
+    } catch (error) {
+      console.error('Error processing Slack output:', error);
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+      }
     }
   }
   

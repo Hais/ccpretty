@@ -107,49 +107,57 @@ class SlackOutput {
      * Output a reduced message to Slack
      */
     async output(reduced) {
-        const { message, metadata } = reduced;
-        const currentType = message.type;
-        // Debug log all messages
-        if (process.env.CCPRETTY_DEBUG) {
-            console.error(`[SlackOutput] Received ${currentType} message, metadata type: ${metadata.type}`);
-        }
-        // Check if this is a significant event worth posting to Slack
-        // Note: We always process tool execution metadata regardless of significance
-        const isToolExecution = metadata.type === 'tool_complete' ||
-            metadata.type === 'tool_failed' ||
-            metadata.type === 'tool_interrupted';
-        if (!isToolExecution && !(0, slack_1.isSignificantEvent)(message)) {
+        try {
+            const { message, metadata } = reduced;
+            const currentType = message.type;
+            // Debug log all messages
             if (process.env.CCPRETTY_DEBUG) {
-                console.error(`[SlackOutput] Skipping non-significant ${currentType} message`);
+                console.error(`[SlackOutput] Received ${currentType} message, metadata type: ${metadata.type}`);
             }
-            return;
+            // Check if this is a significant event worth posting to Slack
+            // Note: We always process tool execution metadata regardless of significance
+            const isToolExecution = metadata.type === 'tool_complete' ||
+                metadata.type === 'tool_failed' ||
+                metadata.type === 'tool_interrupted';
+            if (!isToolExecution && !(0, slack_1.isSignificantEvent)(message)) {
+                if (process.env.CCPRETTY_DEBUG) {
+                    console.error(`[SlackOutput] Skipping non-significant ${currentType} message`);
+                }
+                return;
+            }
+            // Flush any pending messages when switching to a different postable message type
+            // (user messages don't count as they're not posted to Slack)
+            const isPostableType = currentType !== 'user';
+            const wasPostableType = this.lastMessageType && this.lastMessageType !== 'user';
+            if (wasPostableType && isPostableType && this.lastMessageType !== currentType) {
+                await this.flushPendingMessages();
+                // Add divider between different message types 
+                await this.postDivider();
+            }
+            // Handle different message types
+            if ((0, models_1.isSystemResponse)(message)) {
+                await this.handleSystemMessage(message);
+            }
+            else if ((0, models_1.isAssistantResponse)(message)) {
+                await this.handleAssistantMessage(message, metadata);
+            }
+            else if (message.type === 'result') {
+                await this.handleResultMessage(message);
+            }
+            else if ((0, models_1.isUserResponse)(message)) {
+                // Handle user messages that contain tool results
+                await this.handleUserMessage(message);
+            }
+            // Update last message type (only for postable types)
+            if (isPostableType) {
+                this.lastMessageType = currentType;
+            }
         }
-        // Flush any pending messages when switching to a different postable message type
-        // (user messages don't count as they're not posted to Slack)
-        const isPostableType = currentType !== 'user';
-        const wasPostableType = this.lastMessageType && this.lastMessageType !== 'user';
-        if (wasPostableType && isPostableType && this.lastMessageType !== currentType) {
-            await this.flushPendingMessages();
-            // Add divider between different message types 
-            await this.postDivider();
-        }
-        // Handle different message types
-        if ((0, models_1.isSystemResponse)(message)) {
-            await this.handleSystemMessage(message);
-        }
-        else if ((0, models_1.isAssistantResponse)(message)) {
-            await this.handleAssistantMessage(message, metadata);
-        }
-        else if (message.type === 'result') {
-            await this.handleResultMessage(message);
-        }
-        else if ((0, models_1.isUserResponse)(message)) {
-            // Handle user messages that contain tool results
-            await this.handleUserMessage(message);
-        }
-        // Update last message type (only for postable types)
-        if (isPostableType) {
-            this.lastMessageType = currentType;
+        catch (error) {
+            console.error('Error processing Slack output:', error);
+            if (process.env.CCPRETTY_DEBUG) {
+                console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+            }
         }
     }
     /**

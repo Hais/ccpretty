@@ -98,3 +98,15 @@ ccpretty < claude-session.log
 ```
 
 This is useful for debugging Slack integration issues or understanding the exact sequence of API calls.
+
+## Error Handling
+
+The tool includes robust error handling to prevent crashes when processing malformed or unexpected messages:
+
+- **Line parsing errors**: Malformed JSON lines are logged and skipped
+- **Message processing errors**: Individual message processing failures don't stop the stream
+- **Output errors**: Terminal and Slack output errors are caught and logged
+- **Queue processing errors**: Queue-based processing errors are handled gracefully
+- **Debug information**: Set `CCPRETTY_DEBUG=1` to see detailed error information and problematic message content
+
+This ensures that ccpretty continues processing even when encountering issues from Claude Code or other upstream sources.

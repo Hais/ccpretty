@@ -19,9 +19,16 @@ export class TerminalOutput {
    * Format and output a reduced message to the terminal
    */
   output(reduced: ReducedMessage): void {
-    const formatted = this.format(reduced);
-    if (formatted) {
-      console.log(formatted);
+    try {
+      const formatted = this.format(reduced);
+      if (formatted) {
+        console.log(formatted);
+      }
+    } catch (error) {
+      console.error('Error formatting terminal output:', error);
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+      }
     }
   }
   

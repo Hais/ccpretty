@@ -116,15 +116,33 @@ async function main() {
         console.error('Queue-based processing enabled');
         messageReducer = new message_reducer_1.MessageReducer();
         messageQueue = new message_queue_1.MessageQueue(async (groups) => {
-            if (!messageReducer)
-                return;
-            const reducedMessages = messageReducer.reduceGroups(groups);
-            for (const reduced of reducedMessages) {
-                // Output to terminal
-                terminalOutput.output(reduced);
-                // Output to Slack if configured
-                if (slackOutput) {
-                    await slackOutput.output(reduced);
+            try {
+                if (!messageReducer)
+                    return;
+                const reducedMessages = messageReducer.reduceGroups(groups);
+                for (const reduced of reducedMessages) {
+                    try {
+                        // Output to terminal
+                        terminalOutput.output(reduced);
+                        // Output to Slack if configured
+                        if (slackOutput) {
+                            await slackOutput.output(reduced);
+                        }
+                    }
+                    catch (error) {
+                        // Log message output errors but continue
+                        console.error('Error outputting message:', error);
+                        if (process.env.CCPRETTY_DEBUG) {
+                            console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                // Log queue processing errors but continue
+                console.error('Error processing message queue:', error);
+                if (process.env.CCPRETTY_DEBUG) {
+                    console.error('Problematic groups:', JSON.stringify(groups, null, 2));
                 }
             }
         });
@@ -136,47 +154,74 @@ async function main() {
         terminal: false
     });
     rl.on('line', async (line) => {
-        // Parse line for JSON messages
-        const messages = inputParser.parseLine(line);
-        for (const message of messages) {
-            if (useQueue && messageQueue) {
-                // Queue-based processing
-                messageQueue.enqueue(message);
-            }
-            else {
-                // Direct processing
-                const reduced = {
-                    message,
-                    metadata: {
-                        type: 'single',
-                        originalCount: 1
+        try {
+            // Parse line for JSON messages
+            const messages = inputParser.parseLine(line);
+            for (const message of messages) {
+                try {
+                    if (useQueue && messageQueue) {
+                        // Queue-based processing
+                        messageQueue.enqueue(message);
                     }
-                };
-                // Output to terminal
-                terminalOutput.output(reduced);
-                // Output to Slack if configured
-                if (slackOutput) {
-                    await slackOutput.output(reduced);
+                    else {
+                        // Direct processing
+                        const reduced = {
+                            message,
+                            metadata: {
+                                type: 'single',
+                                originalCount: 1
+                            }
+                        };
+                        // Output to terminal
+                        terminalOutput.output(reduced);
+                        // Output to Slack if configured
+                        if (slackOutput) {
+                            await slackOutput.output(reduced);
+                        }
+                    }
                 }
+                catch (error) {
+                    // Log message processing errors but continue
+                    console.error('Error processing message:', error);
+                    if (process.env.CCPRETTY_DEBUG) {
+                        console.error('Problematic message:', JSON.stringify(message, null, 2));
+                    }
+                }
+            }
+        }
+        catch (error) {
+            // Log line parsing errors but continue
+            console.error('Error parsing line:', error);
+            if (process.env.CCPRETTY_DEBUG) {
+                console.error('Problematic line:', line);
             }
         }
     });
     rl.on('close', async () => {
-        // Stop queue processing if enabled
-        if (messageQueue) {
-            // Give the queue a moment to process any final messages
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            messageQueue.stop();
-        }
-        // Wait for all Slack messages to be sent before exiting
-        if (slackOutput) {
-            const pendingCount = slackOutput.getPendingCount();
-            if (pendingCount > 0) {
-                console.error(`Waiting for ${pendingCount} Slack messages to be sent...`);
+        try {
+            // Stop queue processing if enabled
+            if (messageQueue) {
+                // Give the queue a moment to process any final messages
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                messageQueue.stop();
             }
-            await slackOutput.waitForCompletion();
+            // Wait for all Slack messages to be sent before exiting
+            if (slackOutput) {
+                const pendingCount = slackOutput.getPendingCount();
+                if (pendingCount > 0) {
+                    console.error(`Waiting for ${pendingCount} Slack messages to be sent...`);
+                }
+                await slackOutput.waitForCompletion();
+            }
+            process.exit(0);
         }
-        process.exit(0);
+        catch (error) {
+            console.error('Error during cleanup:', error);
+            process.exit(1);
+        }
     });
 }
-main();
+main().catch((error) => {
+    console.error('Fatal error in ccpretty:', error);
+    process.exit(1);
+});
