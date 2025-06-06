@@ -44,6 +44,7 @@ const models_1 = require("./models");
 const formatters_1 = require("./formatters");
 const message_queue_1 = require("./message-queue");
 const message_reducer_1 = require("./message-reducer");
+const slack_1 = require("./slack");
 // Get configuration from environment variables and arguments
 function getConfig() {
     let threadTs = process.env.CCPRETTY_SLACK_THREAD_TS;
@@ -88,75 +89,19 @@ function writeSlackThreadToFile(threadTs) {
         console.error('Failed to write Slack thread timestamp to file');
     }
 }
-// Check if an event is significant enough to post to Slack
-function isSignificantEvent(data) {
-    try {
-        // System init messages (session start)
-        if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-            return true;
-        }
-        // Result messages (task completion/failure)
-        if (data.type === 'result') {
-            return true;
-        }
-        // Assistant messages with text content (no tool use)
-        if ((0, models_1.isAssistantResponse)(data) && data.message?.type === 'message') {
-            const content = data.message.content;
-            if (!Array.isArray(content))
-                return false;
-            const hasText = content.some(c => (0, models_1.isTextContent)(c));
-            const hasToolUse = content.some(c => (0, models_1.isToolUseContent)(c));
-            // Include text-only messages OR tool use messages
-            return hasText || hasToolUse;
-        }
-        // User messages with tool results
-        if ((0, models_1.isUserResponse)(data) && data.message?.content) {
-            const content = data.message.content;
-            if (!Array.isArray(content))
-                return false;
-            return content.some(c => (0, models_1.isToolResultContent)(c));
-        }
-        return false;
-    }
-    catch (error) {
-        // If anything goes wrong, just return false
-        return false;
-    }
-}
-// Get the type of message for grouping purposes
-function getMessageType(data) {
-    try {
-        if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-            return 'system_init';
-        }
-        if (data.type === 'result') {
-            return 'result';
-        }
-        if ((0, models_1.isAssistantResponse)(data) && data.message?.content) {
-            const content = data.message.content;
-            if (Array.isArray(content)) {
-                const hasToolUse = content.some(c => (0, models_1.isToolUseContent)(c));
-                return hasToolUse ? 'tool_use' : 'assistant';
-            }
-        }
-        if ((0, models_1.isUserResponse)(data)) {
-            return 'tool_result';
-        }
-        return 'unknown';
-    }
-    catch (error) {
-        return 'unknown';
-    }
-}
-// Extract assistant message content without formatting
-function extractAssistantContent(data) {
+// Use isSignificantEvent from slack.ts
+const isSignificantEvent = slack_1.isSignificantEvent;
+// Use getMessageType from slack.ts
+const getMessageType = slack_1.getMessageType;
+// Use extractAssistantContent from slack.ts
+const extractAssistantContent = slack_1.extractAssistantContent;
+// Extract full assistant content without truncation (for deduplication)
+function extractFullAssistantContent(data) {
     try {
         if ((0, models_1.isAssistantResponse)(data) && data.message?.content && Array.isArray(data.message.content)) {
             const textContent = data.message.content.filter(c => (0, models_1.isTextContent)(c));
             if (textContent.length > 0) {
-                const message = textContent.map((c) => c.text || '').join('\n\n');
-                // Truncate long messages
-                return message.length > 500 ? message.substring(0, 497) + '...' : message;
+                return textContent.map((c) => c.text || '').join('\n\n');
             }
         }
         return '';
@@ -230,80 +175,139 @@ function formatAssistantMessageList(messages) {
     }).join('\n\n');
     return header + formattedMessages;
 }
-// Create Slack blocks for better formatting
-function createSlackBlocks(data) {
-    if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-        return [
-            {
-                type: "header",
-                text: {
-                    type: "plain_text",
-                    text: "🚀 Claude Code Session Started"
-                }
-            },
-            {
-                type: "section",
-                fields: [
-                    {
-                        type: "mrkdwn",
-                        text: `*Session ID:*\n\`${data.session_id}\``
-                    },
-                    {
-                        type: "mrkdwn",
-                        text: `*Tools:*\n${data.tools.join(', ')}`
-                    }
-                ]
-            }
-        ];
+// Use createSlackBlocks from slack.ts
+const createSlackBlocks = slack_1.createSlackBlocks;
+// Use createSlackMessage from slack.ts
+const createSlackMessage = slack_1.createSlackMessage;
+// Add reaction to a Slack message (non-blocking)
+async function addReaction(slackConfig, timestamp, reaction) {
+    try {
+        await slackConfig.client.reactions.add({
+            channel: slackConfig.channel,
+            timestamp: timestamp,
+            name: reaction,
+        });
     }
-    if (data.type === 'result') {
-        const isSuccess = data.subtype === 'success' && !data.is_error;
-        const icon = isSuccess ? '✅' : '❌';
-        const status = isSuccess ? 'Completed' : 'Failed';
-        return [
-            {
-                type: "header",
-                text: {
-                    type: "plain_text",
-                    text: `${icon} Task ${status}`
-                }
-            },
-            {
-                type: "section",
-                fields: [
-                    {
-                        type: "mrkdwn",
-                        text: `*Duration:*\n${(data.duration_ms / 1000).toFixed(2)}s`
-                    },
-                    {
-                        type: "mrkdwn",
-                        text: `*Cost:*\n$${data.cost_usd.toFixed(4)} USD`
-                    },
-                    {
-                        type: "mrkdwn",
-                        text: `*Turns:*\n${data.num_turns}`
-                    },
-                    {
-                        type: "mrkdwn",
-                        text: `*API Time:*\n${(data.duration_api_ms / 1000).toFixed(2)}s`
-                    }
-                ]
-            }
-        ];
+    catch (error) {
+        // Silently ignore all reaction errors to prevent script failure
+        // Only log in debug if needed
     }
-    if ((0, models_1.isAssistantResponse)(data)) {
-        const content = data.message.content;
-        const toolUses = content.filter(c => (0, models_1.isToolUseContent)(c));
-        const textContent = content.filter(c => (0, models_1.isTextContent)(c));
-        // Handle tool use messages
-        if (toolUses.length > 0) {
-            const blocks = [];
-            toolUses.forEach((tool) => {
+}
+// Remove reaction from a Slack message (non-blocking)
+async function removeReaction(slackConfig, timestamp, reaction) {
+    try {
+        await slackConfig.client.reactions.remove({
+            channel: slackConfig.channel,
+            timestamp: timestamp,
+            name: reaction,
+        });
+    }
+    catch (error) {
+        // Silently ignore all reaction errors to prevent script failure
+        // Only log in debug if needed
+    }
+}
+// Safely manage reactions without blocking
+async function safeManageReactions(slackConfig, timestamp, addReactions, removeReactions) {
+    // Fire and forget - don't await
+    Promise.all([
+        ...removeReactions.map(r => removeReaction(slackConfig, timestamp, r)),
+        ...addReactions.map(r => addReaction(slackConfig, timestamp, r))
+    ]).catch(() => {
+        // Silently ignore any errors
+    });
+}
+// Create combined blocks for multiple tool uses
+async function createCombinedToolUseBlocks(slackConfig, newData, totalCount) {
+    const blocks = [
+        {
+            type: "header",
+            text: {
+                type: "plain_text",
+                text: `🔧 Tools (${totalCount} operations)`
+            }
+        }
+    ];
+    // Add new tool uses from the current message
+    if ((0, models_1.isAssistantResponse)(newData)) {
+        const toolUses = newData.message.content.filter(c => (0, models_1.isToolUseContent)(c));
+        toolUses.forEach((tool, index) => {
+            // Add divider between tools
+            if (blocks.length > 1) {
+                blocks.push({ type: "divider" });
+            }
+            // Special formatting for TodoWrite
+            if (tool.name === 'TodoWrite' && tool.input.todos) {
                 blocks.push({
-                    type: "header",
+                    type: "section",
                     text: {
-                        type: "plain_text",
-                        text: `🔧 ${tool.name}`
+                        type: "mrkdwn",
+                        text: "*📝 TodoWrite*"
+                    }
+                });
+                // Group todos by status
+                const pendingTodos = tool.input.todos.filter((t) => t.status === 'pending');
+                const inProgressTodos = tool.input.todos.filter((t) => t.status === 'in_progress');
+                const completedTodos = tool.input.todos.filter((t) => t.status === 'completed');
+                // Add pending todos
+                if (pendingTodos.length > 0) {
+                    const pendingText = pendingTodos.map((todo) => {
+                        const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                            todo.priority === 'medium' ? '🟡' : '🟢';
+                        return `${priorityEmoji} ${todo.content}`;
+                    }).join('\n');
+                    blocks.push({
+                        type: "section",
+                        text: {
+                            type: "mrkdwn",
+                            text: `*⏳ Pending:*\n${pendingText}`
+                        }
+                    });
+                }
+                // Add in-progress todos
+                if (inProgressTodos.length > 0) {
+                    const inProgressText = inProgressTodos.map((todo) => {
+                        const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                            todo.priority === 'medium' ? '🟡' : '🟢';
+                        return `${priorityEmoji} ${todo.content}`;
+                    }).join('\n');
+                    blocks.push({
+                        type: "section",
+                        text: {
+                            type: "mrkdwn",
+                            text: `*🔄 In Progress:*\n${inProgressText}`
+                        }
+                    });
+                }
+                // Add completed todos
+                if (completedTodos.length > 0) {
+                    const completedText = completedTodos.map((todo) => `~${todo.content}~`).join('\n');
+                    blocks.push({
+                        type: "section",
+                        text: {
+                            type: "mrkdwn",
+                            text: `*✅ Completed:*\n${completedText}`
+                        }
+                    });
+                }
+                // Add summary
+                blocks.push({
+                    type: "context",
+                    elements: [
+                        {
+                            type: "mrkdwn",
+                            text: `📊 *Summary:* ${completedTodos.length}/${tool.input.todos.length} completed`
+                        }
+                    ]
+                });
+            }
+            else {
+                // Standard tool formatting
+                blocks.push({
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: `*${tool.name}*`
                     }
                 });
                 const fields = [];
@@ -346,150 +350,23 @@ function createSlackBlocks(data) {
                         fields: fields
                     });
                 }
-                // Add status indicator
-                blocks.push({
-                    type: "context",
-                    elements: [
-                        {
-                            type: "mrkdwn",
-                            text: "🟡 *Running...*"
-                        }
-                    ]
-                });
-            });
-            return blocks;
-        }
-        // Handle text content from assistant messages
-        if (textContent.length > 0) {
-            // Combine all text content
-            const message = textContent.map((c) => c.text).join('\n\n');
-            // Truncate long messages for Slack (blocks have a 3000 char limit)
-            const truncated = message.length > 2800 ? message.substring(0, 2797) + '...' : message;
-            return [
-                {
-                    type: "section",
-                    text: {
-                        type: "mrkdwn",
-                        text: `💬 *Assistant:*\n${truncated}`
-                    }
-                }
-            ];
-        }
-    }
-    // Handle tool results
-    if ((0, models_1.isUserResponse)(data)) {
-        const toolResults = data.message.content.filter(c => (0, models_1.isToolResultContent)(c));
-        if (toolResults.length > 0) {
-            // This will be handled by updating existing tool_use messages
-            return [];
-        }
-    }
-    return [
-        {
-            type: "section",
-            text: {
-                type: "plain_text",
-                text: "Event processed"
             }
-        }
-    ];
-}
-// Create a simplified message for Slack (fallback)
-function createSlackMessage(data) {
-    if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-        return `🚀 *Claude Code Session Started*\nSession ID: \`${data.session_id}\`\nTools: ${data.tools.join(', ')}`;
-    }
-    if (data.type === 'result') {
-        const isSuccess = data.subtype === 'success' && !data.is_error;
-        const icon = isSuccess ? '✅' : '❌';
-        const status = isSuccess ? 'Completed' : 'Failed';
-        return `${icon} *Task ${status}*\nDuration: ${(data.duration_ms / 1000).toFixed(2)}s | Cost: $${data.cost_usd.toFixed(4)} USD`;
-    }
-    if ((0, models_1.isAssistantResponse)(data)) {
-        const content = data.message.content;
-        const toolUses = content.filter(c => (0, models_1.isToolUseContent)(c));
-        const textContent = content.filter(c => (0, models_1.isTextContent)(c));
-        // Handle tool use messages
-        if (toolUses.length > 0) {
-            const toolMessages = toolUses.map((tool) => {
-                let msg = `🔧 *${tool.name}*`;
-                // Add file path for file-related tools
-                if (tool.input.file_path) {
-                    const trimmedPath = (0, formatters_1.trimFilePath)(tool.input.file_path);
-                    msg += `\nFile: \`${trimmedPath}\``;
-                }
-                if (tool.input.command) {
-                    msg += `\nCommand: \`${tool.input.command}\``;
-                }
-                if (tool.input.description) {
-                    msg += `\nDescription: ${tool.input.description}`;
-                }
-                // Add other relevant parameters
-                if (tool.input.pattern) {
-                    msg += `\nPattern: \`${tool.input.pattern}\``;
-                }
-                if (tool.input.limit && typeof tool.input.limit === 'number') {
-                    msg += `\nLimit: ${tool.input.limit} lines`;
-                }
-                if (tool.input.offset && typeof tool.input.offset === 'number') {
-                    msg += `\nOffset: ${tool.input.offset}`;
-                }
-                msg += `\n🟡 *Running...*`;
-                return msg;
+            // Add status indicator
+            blocks.push({
+                type: "context",
+                elements: [
+                    {
+                        type: "mrkdwn",
+                        text: "🟡 *Running...*"
+                    }
+                ]
             });
-            return toolMessages.join('\n\n');
-        }
-        // Handle text content from assistant messages
-        if (textContent.length > 0) {
-            // Combine all text content
-            const message = textContent.map((c) => c.text).join('\n\n');
-            // Truncate long messages for Slack
-            const truncated = message.length > 500 ? message.substring(0, 497) + '...' : message;
-            return `💬 *Assistant:*\n${truncated}`;
-        }
-    }
-    return 'Event processed';
-}
-// Add reaction to a Slack message (non-blocking)
-async function addReaction(slackConfig, timestamp, reaction) {
-    try {
-        await slackConfig.client.reactions.add({
-            channel: slackConfig.channel,
-            timestamp: timestamp,
-            name: reaction,
         });
     }
-    catch (error) {
-        // Silently ignore all reaction errors to prevent script failure
-        // Only log in debug if needed
-    }
-}
-// Remove reaction from a Slack message (non-blocking)
-async function removeReaction(slackConfig, timestamp, reaction) {
-    try {
-        await slackConfig.client.reactions.remove({
-            channel: slackConfig.channel,
-            timestamp: timestamp,
-            name: reaction,
-        });
-    }
-    catch (error) {
-        // Silently ignore all reaction errors to prevent script failure
-        // Only log in debug if needed
-    }
-}
-// Safely manage reactions without blocking
-async function safeManageReactions(slackConfig, timestamp, addReactions, removeReactions) {
-    // Fire and forget - don't await
-    Promise.all([
-        ...removeReactions.map(r => removeReaction(slackConfig, timestamp, r)),
-        ...addReactions.map(r => addReaction(slackConfig, timestamp, r))
-    ]).catch(() => {
-        // Silently ignore any errors
-    });
+    return blocks;
 }
 // Update a tool_use message with completion status
-async function updateToolUseMessage(slackConfig, messageTs, toolName, toolResult) {
+async function updateToolUseMessage(slackConfig, messageTs, toolName, toolInput, toolResult) {
     try {
         const isError = toolResult.is_error || false;
         const statusIcon = isError ? '🔴' : '🟢';
@@ -502,24 +379,69 @@ async function updateToolUseMessage(slackConfig, messageTs, toolName, toolResult
                     type: "plain_text",
                     text: `🔧 ${toolName}`
                 }
-            },
-            {
-                type: "context",
-                elements: [
-                    {
-                        type: "mrkdwn",
-                        text: `${statusIcon} *${statusText}*`
-                    }
-                ]
             }
         ];
+        // Add original tool input fields
+        const fields = [];
+        // Add file path for file-related tools
+        if (toolInput.file_path) {
+            const trimmedPath = (0, formatters_1.trimFilePath)(toolInput.file_path);
+            fields.push({
+                type: "mrkdwn",
+                text: `*File:*\n\`${trimmedPath}\``
+            });
+        }
+        if (toolInput.command) {
+            fields.push({
+                type: "mrkdwn",
+                text: `*Command:*\n\`${toolInput.command}\``
+            });
+        }
+        if (toolInput.description) {
+            fields.push({
+                type: "mrkdwn",
+                text: `*Description:*\n${toolInput.description}`
+            });
+        }
+        // Add other relevant parameters
+        if (toolInput.pattern) {
+            fields.push({
+                type: "mrkdwn",
+                text: `*Pattern:*\n\`${toolInput.pattern}\``
+            });
+        }
+        if (toolInput.limit && typeof toolInput.limit === 'number') {
+            fields.push({
+                type: "mrkdwn",
+                text: `*Limit:*\n${toolInput.limit} lines`
+            });
+        }
+        if (fields.length > 0) {
+            blocks.push({
+                type: "section",
+                fields: fields
+            });
+        }
+        // Add status indicator
+        blocks.push({
+            type: "context",
+            elements: [
+                {
+                    type: "mrkdwn",
+                    text: `${statusIcon} *${statusText}*`
+                }
+            ]
+        });
         // If there's an error message, include it
         if (isError && toolResult.content) {
+            const errorMessage = toolResult.content.length > 500
+                ? toolResult.content.substring(0, 497) + '...'
+                : toolResult.content;
             blocks.push({
                 type: "section",
                 text: {
                     type: "mrkdwn",
-                    text: `⚠️ Error: ${toolResult.content}`
+                    text: `⚠️ *Error:*\n\`\`\`${errorMessage}\`\`\``
                 }
             });
         }
@@ -544,17 +466,36 @@ async function postToSlack(slackConfig, data) {
             for (const toolResult of toolResults) {
                 const toolInfo = slackConfig.pendingToolUses.get(toolResult.tool_use_id);
                 if (toolInfo) {
-                    await updateToolUseMessage(slackConfig, toolInfo.messageTs, toolInfo.toolName, toolResult);
+                    await updateToolUseMessage(slackConfig, toolInfo.messageTs, toolInfo.toolName, toolInfo.toolInput, toolResult);
                     slackConfig.pendingToolUses.delete(toolResult.tool_use_id);
                 }
             }
             return; // Don't post a separate message for tool results
         }
-        const messageText = createSlackMessage(data);
+        // Generate a unique content identifier for deduplication
+        // For assistant messages, use the full original content instead of truncated text
+        let contentForDedup = '';
+        if ((0, models_1.isAssistantResponse)(data)) {
+            const textContent = data.message.content.filter(c => (0, models_1.isTextContent)(c));
+            if (textContent.length > 0) {
+                // Use full original content for deduplication
+                contentForDedup = textContent.map((c) => c.text).join('\n\n');
+            }
+            else {
+                // For tool uses, create a stable identifier
+                const toolUses = data.message.content.filter(c => (0, models_1.isToolUseContent)(c));
+                contentForDedup = toolUses.map((t) => `${t.name}:${JSON.stringify(t.input)}`).join('|');
+            }
+        }
+        else {
+            // For non-assistant messages, use the formatted message
+            contentForDedup = createSlackMessage(data);
+        }
         // Check for duplicate content - skip posting if identical to last message
-        if (slackConfig.lastPostedContent && slackConfig.lastPostedContent === messageText) {
+        if (slackConfig.lastPostedContent && slackConfig.lastPostedContent === contentForDedup) {
             return; // Skip duplicate message
         }
+        const messageText = createSlackMessage(data);
         // Special deduplication for result messages that match the last assistant message
         // Only deduplicate if the result text is substantial (more than just status)
         if (messageType === 'result' && data.result && slackConfig.lastAssistantText && data.result.length > 50) {
@@ -578,41 +519,34 @@ async function postToSlack(slackConfig, data) {
                 // Save the thread timestamp for future use
                 writeSlackThreadToFile(result.ts);
                 // Track the posted content for deduplication
-                slackConfig.lastPostedContent = messageText;
+                slackConfig.lastPostedContent = contentForDedup;
                 // Add rocket reaction to indicate workflow started
                 if (messageType === 'system_init') {
                     safeManageReactions(slackConfig, result.ts, ['rocket'], []);
                 }
-                // Store last message info and track tool_use IDs
+                // Store last message info
+                slackConfig.lastMessage = {
+                    ts: result.ts,
+                    type: messageType,
+                    content: messageType === 'assistant' ? extractFullAssistantContent(data) : contentForDedup,
+                    count: 1
+                };
+                // Track tool_use IDs if this is a tool_use message
                 if (messageType === 'tool_use' && (0, models_1.isAssistantResponse)(data)) {
                     const toolUses = data.message.content.filter(c => (0, models_1.isToolUseContent)(c));
                     toolUses.forEach((tool) => {
                         if (tool.id && result.ts) {
                             slackConfig.pendingToolUses.set(tool.id, {
                                 messageTs: result.ts,
-                                toolName: tool.name
+                                toolName: tool.name,
+                                toolInput: tool.input
                             });
                         }
                     });
                 }
+                // Track assistant text for result deduplication
                 if (messageType === 'assistant') {
-                    const content = extractAssistantContent(data);
-                    slackConfig.lastMessage = {
-                        ts: result.ts,
-                        type: messageType,
-                        content: content,
-                        count: 1
-                    };
-                    // Track assistant text for result deduplication
-                    slackConfig.lastAssistantText = content;
-                }
-                else {
-                    slackConfig.lastMessage = {
-                        ts: result.ts,
-                        type: messageType,
-                        content: messageText,
-                        count: 1
-                    };
+                    slackConfig.lastAssistantText = extractFullAssistantContent(data);
                 }
             }
         }
@@ -638,16 +572,41 @@ async function postToSlack(slackConfig, data) {
             // Check if we should update the previous message
             const shouldUpdate = slackConfig.lastMessage &&
                 slackConfig.lastMessage.type === messageType &&
-                messageType === 'assistant'; // Only update assistant messages
+                ['assistant', 'tool_use', 'system_init'].includes(messageType); // Update assistant, tool_use, and system_init messages
             if (shouldUpdate && slackConfig.lastMessage) {
                 try {
-                    // Extract new content and append to existing
-                    const newContent = extractAssistantContent(data);
-                    const existingMessages = slackConfig.lastMessage.content.split('\n---\n');
-                    existingMessages.push(newContent);
-                    // Format as blocks and fallback text
-                    const updatedBlocks = formatAssistantMessageBlocks(existingMessages);
-                    const updatedMessage = formatAssistantMessageList(existingMessages);
+                    let updatedBlocks = [];
+                    let updatedMessage = '';
+                    let updatedContent = '';
+                    if (messageType === 'assistant') {
+                        // Extract new full content and append to existing
+                        const newContent = extractFullAssistantContent(data);
+                        const existingMessages = slackConfig.lastMessage.content.split('\n---\n');
+                        existingMessages.push(newContent);
+                        // Format as blocks and fallback text
+                        updatedBlocks = formatAssistantMessageBlocks(existingMessages);
+                        updatedMessage = formatAssistantMessageList(existingMessages);
+                        updatedContent = existingMessages.join('\n---\n');
+                        // Update last assistant text with the latest message
+                        slackConfig.lastAssistantText = existingMessages[existingMessages.length - 1];
+                    }
+                    else if (messageType === 'tool_use') {
+                        // Handle tool_use message updates
+                        const existingCount = slackConfig.lastMessage.count;
+                        const newCount = existingCount + 1;
+                        // Create combined blocks for multiple tool uses
+                        updatedBlocks = await createCombinedToolUseBlocks(slackConfig, data, newCount);
+                        updatedMessage = `🔧 *Tools (${newCount} operations)*`;
+                        updatedContent = contentForDedup;
+                    }
+                    else if (messageType === 'system_init') {
+                        // Handle system_init message updates (rare, but possible)
+                        const existingCount = slackConfig.lastMessage.count;
+                        const newCount = existingCount + 1;
+                        updatedBlocks = createSlackBlocks(data);
+                        updatedMessage = `🚀 *Claude Code Sessions (${newCount})*`;
+                        updatedContent = contentForDedup;
+                    }
                     // Try to update the previous message
                     const updateResult = await slackConfig.client.chat.update({
                         channel: slackConfig.channel,
@@ -657,12 +616,25 @@ async function postToSlack(slackConfig, data) {
                     });
                     if (updateResult.ok) {
                         // Update stored content
-                        slackConfig.lastMessage.content = existingMessages.join('\n---\n');
-                        slackConfig.lastMessage.count = existingMessages.length;
-                        // Update deduplication tracking with the updated message
-                        slackConfig.lastPostedContent = updatedMessage;
-                        // Update last assistant text with the latest message
-                        slackConfig.lastAssistantText = existingMessages[existingMessages.length - 1];
+                        slackConfig.lastMessage.content = updatedContent;
+                        slackConfig.lastMessage.count = messageType === 'assistant' ?
+                            updatedContent.split('\n---\n').length :
+                            slackConfig.lastMessage.count + 1;
+                        // Update deduplication tracking with the full combined content
+                        slackConfig.lastPostedContent = updatedContent;
+                        // Track new tool_use IDs if this is a tool_use message
+                        if (messageType === 'tool_use' && (0, models_1.isAssistantResponse)(data)) {
+                            const toolUses = data.message.content.filter(c => (0, models_1.isToolUseContent)(c));
+                            toolUses.forEach((tool) => {
+                                if (tool.id) {
+                                    slackConfig.pendingToolUses.set(tool.id, {
+                                        messageTs: slackConfig.lastMessage.ts,
+                                        toolName: tool.name,
+                                        toolInput: tool.input
+                                    });
+                                }
+                            });
+                        }
                         return; // Successfully updated
                     }
                 }
@@ -682,36 +654,30 @@ async function postToSlack(slackConfig, data) {
             // Store last message info and track tool_use IDs
             if (result.ts) {
                 // Track the posted content for deduplication
-                slackConfig.lastPostedContent = messageText;
+                slackConfig.lastPostedContent = contentForDedup;
+                // Store last message info
+                slackConfig.lastMessage = {
+                    ts: result.ts,
+                    type: messageType,
+                    content: messageType === 'assistant' ? extractFullAssistantContent(data) : contentForDedup,
+                    count: 1
+                };
+                // Track tool_use IDs if this is a tool_use message
                 if (messageType === 'tool_use' && (0, models_1.isAssistantResponse)(data)) {
                     const toolUses = data.message.content.filter(c => (0, models_1.isToolUseContent)(c));
                     toolUses.forEach((tool) => {
                         if (tool.id && result.ts) {
                             slackConfig.pendingToolUses.set(tool.id, {
                                 messageTs: result.ts,
-                                toolName: tool.name
+                                toolName: tool.name,
+                                toolInput: tool.input
                             });
                         }
                     });
                 }
+                // Track assistant text for result deduplication
                 if (messageType === 'assistant') {
-                    const content = extractAssistantContent(data);
-                    slackConfig.lastMessage = {
-                        ts: result.ts,
-                        type: messageType,
-                        content: content,
-                        count: 1
-                    };
-                    // Track assistant text for result deduplication
-                    slackConfig.lastAssistantText = content;
-                }
-                else {
-                    slackConfig.lastMessage = {
-                        ts: result.ts,
-                        type: messageType,
-                        content: messageText,
-                        count: 1
-                    };
+                    slackConfig.lastAssistantText = extractFullAssistantContent(data);
                 }
             }
         }
@@ -748,9 +714,8 @@ function formatLogEntry(data) {
     if (data.type === 'result') {
         return (0, formatters_1.formatResultResponse)(data);
     }
-    // Default: just return the type
-    const type = data.type || 'unknown';
-    return type;
+    // Default: format unknown event with full details
+    return (0, formatters_1.formatUnknownResponse)(data);
 }
 async function main() {
     const config = getConfig();
@@ -859,6 +824,9 @@ async function main() {
         }
         // Stop queue processing if enabled
         if (messageQueue) {
+            // Give the queue a moment to process any final messages
+            // that might have just been enqueued
+            await new Promise(resolve => setTimeout(resolve, 1000));
             messageQueue.stop();
         }
         process.exit(0);

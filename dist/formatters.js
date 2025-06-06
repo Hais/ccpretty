@@ -8,6 +8,7 @@ exports.formatAssistantResponse = formatAssistantResponse;
 exports.formatUserResponse = formatUserResponse;
 exports.formatSystemResponse = formatSystemResponse;
 exports.formatResultResponse = formatResultResponse;
+exports.formatUnknownResponse = formatUnknownResponse;
 const picocolors_1 = __importDefault(require("picocolors"));
 const boxen_1 = __importDefault(require("boxen"));
 const models_1 = require("./models");
@@ -123,9 +124,28 @@ function formatUserResponse(response) {
 function formatSystemResponse(response) {
     const lines = [];
     if ((0, models_1.isSystemInitMessage)(response)) {
-        lines.push(`${picocolors_1.default.bold('🚀 Session Initialized')}`);
-        lines.push(`${picocolors_1.default.dim('Session ID:')} ${response.session_id}`);
-        lines.push(`${picocolors_1.default.dim('Tools:')} ${response.tools.join(', ')}`);
+        // Check for custom environment variables
+        const customTitle = process.env.CCPRETTY_TITLE;
+        const customDescription = process.env.CCPRETTY_DESCRIPTION;
+        const customUrl = process.env.CCPRETTY_URL;
+        if (customTitle || customDescription || customUrl) {
+            // Use custom format
+            if (customTitle) {
+                lines.push(`${picocolors_1.default.bold(`🚀 ${customTitle}`)}`);
+            }
+            if (customDescription) {
+                lines.push(`${picocolors_1.default.dim(customDescription)}`);
+            }
+            if (customUrl) {
+                lines.push(`${picocolors_1.default.dim('URL:')} ${customUrl}`);
+            }
+            lines.push(`${picocolors_1.default.dim('Session ID:')} ${response.session_id}`);
+        }
+        else {
+            // Use default format without tools
+            lines.push(`${picocolors_1.default.bold('🚀 Session Initialized')}`);
+            lines.push(`${picocolors_1.default.dim('Session ID:')} ${response.session_id}`);
+        }
         if (response.mcp_servers.length > 0) {
             lines.push(`${picocolors_1.default.dim('MCP Servers:')} ${response.mcp_servers.join(', ')}`);
         }
@@ -166,6 +186,38 @@ function formatResultResponse(data) {
         borderColor: borderColor,
         borderStyle: 'double',
         title: 'result',
+        titleAlignment: 'center'
+    });
+}
+function formatUnknownResponse(data) {
+    const lines = [];
+    const type = data.type || 'unknown';
+    lines.push(`${picocolors_1.default.bold(`⚠️  Unknown Event Type: ${type}`)}`);
+    lines.push('');
+    lines.push(picocolors_1.default.dim('Full event details:'));
+    lines.push('');
+    // Pretty print the JSON with indentation
+    try {
+        const jsonStr = JSON.stringify(data, null, 2);
+        // Add syntax highlighting to JSON
+        const highlighted = jsonStr
+            .replace(/"([^"]+)":/g, picocolors_1.default.cyan('"$1":')) // Keys
+            .replace(/: "([^"]+)"/g, ': ' + picocolors_1.default.green('"$1"')) // String values
+            .replace(/: (\d+)/g, ': ' + picocolors_1.default.yellow('$1')) // Numbers
+            .replace(/: (true|false)/g, ': ' + picocolors_1.default.magenta('$1')) // Booleans
+            .replace(/: null/g, ': ' + picocolors_1.default.gray('null')); // Null
+        lines.push(highlighted);
+    }
+    catch (error) {
+        // Fallback to simple stringification
+        lines.push(String(data));
+    }
+    // Wrap in a box with warning color
+    return (0, boxen_1.default)(lines.join('\n'), {
+        padding: 1,
+        borderColor: 'yellow',
+        borderStyle: 'round',
+        title: `unknown: ${type}`,
         titleAlignment: 'center'
     });
 }

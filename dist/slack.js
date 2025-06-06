@@ -87,7 +87,27 @@ function extractAssistantContent(data) {
 // Create a simplified message for Slack (fallback)
 function createSlackMessage(data) {
     if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-        return `🚀 *Claude Code Session Started*\nSession ID: \`${data.session_id}\`\nTools: ${data.tools.join(', ')}`;
+        // Check for custom environment variables
+        const customTitle = process.env.CCPRETTY_TITLE;
+        const customDescription = process.env.CCPRETTY_DESCRIPTION;
+        const customUrl = process.env.CCPRETTY_URL;
+        if (customTitle || customDescription || customUrl) {
+            let message = '';
+            if (customTitle) {
+                message += `🚀 *${customTitle}*`;
+            }
+            if (customDescription) {
+                message += `\n${customDescription}`;
+            }
+            if (customUrl) {
+                message += `\nURL: ${customUrl}`;
+            }
+            message += `\nSession ID: \`${data.session_id}\``;
+            return message;
+        }
+        else {
+            return `🚀 *Claude Code Session Started*\nSession ID: \`${data.session_id}\``;
+        }
     }
     if (data.type === 'result') {
         const isSuccess = data.subtype === 'success' && !data.is_error;
@@ -102,6 +122,37 @@ function createSlackMessage(data) {
         // Handle tool use messages
         if (toolUses.length > 0) {
             const toolMessages = toolUses.map((tool) => {
+                // Special formatting for TodoWrite
+                if (tool.name === 'TodoWrite' && tool.input.todos) {
+                    let msg = `📝 *Todo List Update*\n`;
+                    // Group todos by status
+                    const pendingTodos = tool.input.todos.filter((t) => t.status === 'pending');
+                    const inProgressTodos = tool.input.todos.filter((t) => t.status === 'in_progress');
+                    const completedTodos = tool.input.todos.filter((t) => t.status === 'completed');
+                    if (pendingTodos.length > 0) {
+                        msg += `\n*⏳ Pending:*\n`;
+                        msg += pendingTodos.map((todo) => {
+                            const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                                todo.priority === 'medium' ? '🟡' : '🟢';
+                            return `${priorityEmoji} ${todo.content}`;
+                        }).join('\n');
+                    }
+                    if (inProgressTodos.length > 0) {
+                        msg += `\n\n*🔄 In Progress:*\n`;
+                        msg += inProgressTodos.map((todo) => {
+                            const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                                todo.priority === 'medium' ? '🟡' : '🟢';
+                            return `${priorityEmoji} ${todo.content}`;
+                        }).join('\n');
+                    }
+                    if (completedTodos.length > 0) {
+                        msg += `\n\n*✅ Completed:*\n`;
+                        msg += completedTodos.map((todo) => `~${todo.content}~`).join('\n');
+                    }
+                    msg += `\n\n📊 *Summary:* ${completedTodos.length}/${tool.input.todos.length} completed`;
+                    return msg;
+                }
+                // Standard tool formatting
                 let msg = `🔧 *${tool.name}*`;
                 // Add file path for file-related tools
                 if (tool.input.file_path) {
@@ -143,28 +194,44 @@ function createSlackMessage(data) {
 // Create Slack blocks for better formatting
 function createSlackBlocks(data) {
     if ((0, models_1.isSystemResponse)(data) && (0, models_1.isSystemInitMessage)(data)) {
-        return [
-            {
-                type: "header",
-                text: {
-                    type: "plain_text",
-                    text: "🚀 Claude Code Session Started"
-                }
-            },
-            {
-                type: "section",
-                fields: [
-                    {
-                        type: "mrkdwn",
-                        text: `*Session ID:*\n\`${data.session_id}\``
-                    },
-                    {
-                        type: "mrkdwn",
-                        text: `*Tools:*\n${data.tools.join(', ')}`
-                    }
-                ]
+        // Check for custom environment variables
+        const customTitle = process.env.CCPRETTY_TITLE;
+        const customDescription = process.env.CCPRETTY_DESCRIPTION;
+        const customUrl = process.env.CCPRETTY_URL;
+        const blocks = [];
+        // Header
+        blocks.push({
+            type: "header",
+            text: {
+                type: "plain_text",
+                text: customTitle ? `🚀 ${customTitle}` : "🚀 Claude Code Session Started"
             }
-        ];
+        });
+        // Section with fields
+        const fields = [];
+        // Add session ID field
+        fields.push({
+            type: "mrkdwn",
+            text: `*Session ID:*\n\`${data.session_id}\``
+        });
+        // Add custom fields if present
+        if (customDescription) {
+            fields.push({
+                type: "mrkdwn",
+                text: `*Description:*\n${customDescription}`
+            });
+        }
+        if (customUrl) {
+            fields.push({
+                type: "mrkdwn",
+                text: `*URL:*\n${customUrl}`
+            });
+        }
+        blocks.push({
+            type: "section",
+            fields: fields
+        });
+        return blocks;
     }
     if (data.type === 'result') {
         const isSuccess = data.subtype === 'success' && !data.is_error;
@@ -209,63 +276,159 @@ function createSlackBlocks(data) {
         if (toolUses.length > 0) {
             const blocks = [];
             toolUses.forEach((tool) => {
-                blocks.push({
-                    type: "header",
-                    text: {
-                        type: "plain_text",
-                        text: `🔧 ${tool.name}`
-                    }
-                });
-                const fields = [];
-                // Add file path for file-related tools
-                if (tool.input.file_path) {
-                    const trimmedPath = (0, formatters_1.trimFilePath)(tool.input.file_path);
-                    fields.push({
-                        type: "mrkdwn",
-                        text: `*File:*\n\`${trimmedPath}\``
-                    });
-                }
-                if (tool.input.command) {
-                    fields.push({
-                        type: "mrkdwn",
-                        text: `*Command:*\n\`${tool.input.command}\``
-                    });
-                }
-                if (tool.input.description) {
-                    fields.push({
-                        type: "mrkdwn",
-                        text: `*Description:*\n${tool.input.description}`
-                    });
-                }
-                // Add other relevant parameters
-                if (tool.input.pattern) {
-                    fields.push({
-                        type: "mrkdwn",
-                        text: `*Pattern:*\n\`${tool.input.pattern}\``
-                    });
-                }
-                if (tool.input.limit && typeof tool.input.limit === 'number') {
-                    fields.push({
-                        type: "mrkdwn",
-                        text: `*Limit:*\n${tool.input.limit} lines`
-                    });
-                }
-                if (fields.length > 0) {
+                // Special formatting for TodoWrite
+                if (tool.name === 'TodoWrite' && tool.input.todos) {
                     blocks.push({
-                        type: "section",
-                        fields: fields
+                        type: "header",
+                        text: {
+                            type: "plain_text",
+                            text: "📝 Todo List Update",
+                            emoji: true
+                        }
+                    });
+                    // Group todos by status
+                    const pendingTodos = tool.input.todos.filter((t) => t.status === 'pending');
+                    const inProgressTodos = tool.input.todos.filter((t) => t.status === 'in_progress');
+                    const completedTodos = tool.input.todos.filter((t) => t.status === 'completed');
+                    // Add pending todos
+                    if (pendingTodos.length > 0) {
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: "*⏳ Pending:*"
+                            }
+                        });
+                        const pendingText = pendingTodos.map((todo) => {
+                            const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                                todo.priority === 'medium' ? '🟡' : '🟢';
+                            return `${priorityEmoji} ${todo.content}`;
+                        }).join('\n');
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: pendingText
+                            }
+                        });
+                    }
+                    // Add in-progress todos
+                    if (inProgressTodos.length > 0) {
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: "*🔄 In Progress:*"
+                            }
+                        });
+                        const inProgressText = inProgressTodos.map((todo) => {
+                            const priorityEmoji = todo.priority === 'high' ? '🔴' :
+                                todo.priority === 'medium' ? '🟡' : '🟢';
+                            return `${priorityEmoji} ${todo.content}`;
+                        }).join('\n');
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: inProgressText
+                            }
+                        });
+                    }
+                    // Add completed todos
+                    if (completedTodos.length > 0) {
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: "*✅ Completed:*"
+                            }
+                        });
+                        const completedText = completedTodos.map((todo) => {
+                            return `~${todo.content}~`;
+                        }).join('\n');
+                        blocks.push({
+                            type: "section",
+                            text: {
+                                type: "mrkdwn",
+                                text: completedText
+                            }
+                        });
+                    }
+                    // Add divider
+                    blocks.push({
+                        type: "divider"
+                    });
+                    // Add summary context
+                    blocks.push({
+                        type: "context",
+                        elements: [
+                            {
+                                type: "mrkdwn",
+                                text: `📊 *Summary:* ${completedTodos.length}/${tool.input.todos.length} completed`
+                            }
+                        ]
                     });
                 }
-                // Add status indicator
-                blocks.push({
-                    type: "context",
-                    elements: [
-                        {
-                            type: "mrkdwn",
-                            text: "🟡 *Running...*"
+                else {
+                    // Standard tool formatting
+                    blocks.push({
+                        type: "header",
+                        text: {
+                            type: "plain_text",
+                            text: `🔧 ${tool.name}`
                         }
-                    ]
-                });
+                    });
+                    const fields = [];
+                    // Add file path for file-related tools
+                    if (tool.input.file_path) {
+                        const trimmedPath = (0, formatters_1.trimFilePath)(tool.input.file_path);
+                        fields.push({
+                            type: "mrkdwn",
+                            text: `*File:*\n\`${trimmedPath}\``
+                        });
+                    }
+                    if (tool.input.command) {
+                        fields.push({
+                            type: "mrkdwn",
+                            text: `*Command:*\n\`${tool.input.command}\``
+                        });
+                    }
+                    if (tool.input.description) {
+                        fields.push({
+                            type: "mrkdwn",
+                            text: `*Description:*\n${tool.input.description}`
+                        });
+                    }
+                    // Add other relevant parameters
+                    if (tool.input.pattern) {
+                        fields.push({
+                            type: "mrkdwn",
+                            text: `*Pattern:*\n\`${tool.input.pattern}\``
+                        });
+                    }
+                    if (tool.input.limit && typeof tool.input.limit === 'number') {
+                        fields.push({
+                            type: "mrkdwn",
+                            text: `*Limit:*\n${tool.input.limit} lines`
+                        });
+                    }
+                    if (fields.length > 0) {
+                        blocks.push({
+                            type: "section",
+                            fields: fields
+                        });
+                    }
+                    // Add status indicator
+                    blocks.push({
+                        type: "context",
+                        elements: [
+                            {
+                                type: "mrkdwn",
+                                text: "🟡 *Running...*"
+                            }
+                        ]
+                    });
+                }
             });
             return blocks;
         }

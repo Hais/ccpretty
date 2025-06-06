@@ -83,6 +83,28 @@ export class MessageQueue {
     
     // Process any remaining messages
     this.processQueue(true);
+    
+    // Force process any remaining pending tool uses
+    if (this.pendingToolUses.size > 0) {
+      const orphanedGroups: MessageGroup[] = [];
+      
+      for (const [toolId, toolPair] of this.pendingToolUses.entries()) {
+        const group: MessageGroup = {
+          type: 'single',
+          messages: [toolPair.toolUse],
+          startTime: toolPair.startTime,
+          endTime: Date.now()
+        };
+        orphanedGroups.push(group);
+        toolPair.toolUse.processed = true;
+      }
+      
+      if (orphanedGroups.length > 0) {
+        this.onProcessMessages(orphanedGroups);
+      }
+      
+      this.pendingToolUses.clear();
+    }
   }
   
   /**

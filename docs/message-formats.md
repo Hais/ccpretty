@@ -36,17 +36,35 @@ graph TD
 }
 ```
 
-**Formatted Output:**
+**Formatted Output (Default):**
 ```
 ╔════════════════════════ system ════════════════════════╗
 ║                                                        ║
 ║   🚀 Session Initialized                               ║
-║                                                        ║
 ║   Session ID: session_abc123                           ║
-║   Available tools: Bash, Read, Write, Edit             ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
 ```
+
+**Formatted Output (With Custom Environment Variables):**
+```bash
+export CCPRETTY_TITLE="Data Processing Pipeline"
+export CCPRETTY_DESCRIPTION="Analyzing Q4 2024 customer data"
+export CCPRETTY_URL="https://dashboard.example.com/job/12345"
+```
+
+```
+╔════════════════════════ system ════════════════════════╗
+║                                                        ║
+║   🚀 Data Processing Pipeline                          ║
+║   Analyzing Q4 2024 customer data                      ║
+║   URL: https://dashboard.example.com/job/12345         ║
+║   Session ID: session_abc123                           ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+Note: The tools list has been removed from the session initialization output to reduce clutter.
 
 ### Assistant Messages
 
@@ -285,6 +303,21 @@ Since only one tool can run at a time, when a new tool starts while another is r
 ╚════════════════════════════════════════════════════════╝
 ```
 
+## Orphaned Tools (Queue Mode Only)
+
+If a tool_use message doesn't receive a corresponding tool_result within 30 seconds, it's marked as orphaned:
+
+```
+╔═══════════════════════ orphaned ═══════════════════════╗
+║                                                        ║
+║  ⌛ Tool: Write - ORPHANED (timeout after 30s)         ║
+║  📁 File: /path/to/output.txt                          ║
+║                                                        ║
+║  🔍 No result received within timeout period          ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
 ## Slack Message Formatting
 
 When Slack integration is enabled, messages are transformed into Slack's Block Kit format:
@@ -304,10 +337,9 @@ graph LR
     G --> H
 ```
 
-### Slack Block Example
+### Slack Block Examples
 
-System initialization message becomes:
-
+#### System Initialization
 ```json
 {
   "blocks": [
@@ -330,6 +362,51 @@ System initialization message becomes:
           "text": "*Tools:*\nBash, Read, Write, Edit"
         }
       ]
+    }
+  ]
+}
+```
+
+#### Tool Execution (In Progress)
+```json
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "⏳ *Tool:* Bash\n`npm test`\n_Running test suite..._"
+      }
+    }
+  ]
+}
+```
+
+#### Tool Execution (Completed)
+```json
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "✅ *Tool:* Bash\n`npm test`\n_Test suite passed (15 tests, 2.3s)_"
+      }
+    }
+  ]
+}
+```
+
+#### Grouped Assistant Messages
+```json
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Assistant:*\n1. I'll analyze your code for performance issues\n2. Running the profiler to identify bottlenecks\n3. Found several optimization opportunities"
+      }
     }
   ]
 }

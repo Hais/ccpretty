@@ -4,7 +4,7 @@
   <img src="assets/logo.png" alt="Claude Code Pretty Logo" width="250" height="250" style="max-width:250px;max-height:250px;">
 </p>
 
-A CLI tool that formats JSON log lines from ccpretty sessions into human-readable output with colored boxes and special formatting. Optionally integrates with Slack to post real-time updates to a channel.
+A CLI tool that formats JSON log lines from Claude Code sessions into human-readable output with colored boxes and special formatting. Optionally integrates with Slack to post real-time updates to a channel.
 
 📚 **[Full Documentation](./docs/)** | 🏗️ **[Architecture](./docs/architecture.md)** | 📋 **[Message Formats](./docs/message-formats.md)**
 
@@ -37,7 +37,7 @@ npm install -g .
 ## Usage
 
 ```bash
-# Basic usage - pipe ccpretty logs through ccpretty
+# Basic usage - pipe Claude Code logs through ccpretty
 claude -p "Hello world" --output-format stream-json --verbose | ccpretty
 
 # With Slack integration
@@ -59,10 +59,13 @@ claude -p "Hello world" --output-format stream-json --verbose | ccpretty --queue
 ## Slack Integration
 
 When Slack environment variables are set, ccpretty will:
-- Create a new thread (or use existing one if `CCPRETTY_SLACK_THREAD_TS` is set)
+- Create a new thread (or use existing one if `CCPRETTY_SLACK_THREAD_TS` is set or `--resume-slack-thread` is used)
 - Post session initialization with available tools
 - Update with assistant messages and tool usage
 - Show workflow status with reactions (🚀 → ✅ or 🚨)
+- Tool status updates show live progress (⏳ → ✅ or ❌)
+- Groups consecutive assistant messages into numbered lists
+- Deduplicates identical messages
 - Save thread timestamp to `~/.ccpretty_slack_ts` for automatic reuse with `--resume-slack-thread`
 
 Required Slack bot permissions:
@@ -88,6 +91,26 @@ Required Slack bot permissions:
 - `channels:history`  
   View messages and other content in public channels that ccpretty has been added to
 
+## Environment Variables
+
+### Slack Integration
+- `CCPRETTY_SLACK_TOKEN` - Slack bot token (xoxb-...)
+- `CCPRETTY_SLACK_CHANNEL` - Slack channel to post to (#channel-name)
+- `CCPRETTY_SLACK_THREAD_TS` - Existing thread timestamp to post to (optional)
+
+### Custom Session Display
+- `CCPRETTY_TITLE` - Custom title to display instead of "Claude Code Session Started"
+- `CCPRETTY_DESCRIPTION` - Custom description to display below the title
+- `CCPRETTY_URL` - Custom URL to display in the session initialization
+
+Example:
+```bash
+export CCPRETTY_TITLE="My Custom Workflow"
+export CCPRETTY_DESCRIPTION="Processing data pipeline for analytics"
+export CCPRETTY_URL="https://example.com/workflow/123"
+claude -p "Hello world" --output-format stream-json --verbose | ccpretty
+```
+
 ## Development
 
 ```bash
@@ -107,12 +130,16 @@ npm run ccpretty
 npm test
 
 # Run specific test suites
-npm test -- tests/queue-behavior.test.ts     # Queue functionality tests
-npm test -- tests/fixture-scenarios.test.ts # Realistic workflow scenarios from fixtures
-npm test -- tests/workflow-scenarios.test.ts # Complex multi-step workflows  
-npm test -- tests/message-reducer.test.ts   # State transformation tests
-npm test -- tests/formatters.test.ts        # Message formatting tests
-npm test -- tests/slack.test.ts             # Slack integration tests
+npm test -- tests/queue-behavior.test.ts      # Queue functionality tests
+npm test -- tests/fixture-scenarios.test.ts   # Realistic workflow scenarios from fixtures
+npm test -- tests/workflow-scenarios.test.ts  # Complex multi-step workflows  
+npm test -- tests/message-reducer.test.ts     # State transformation tests
+npm test -- tests/formatters.test.ts          # Message formatting tests
+npm test -- tests/slack.test.ts               # Slack integration tests
+npm test -- tests/cli-integration.test.ts     # CLI integration tests
+npm test -- tests/json-processing.test.ts     # JSON processing tests
+npm test -- tests/models.test.ts              # Type guards and models tests
+npm test -- tests/queue-integration.test.ts   # Queue integration tests
 ```
 
 ## Message Types

@@ -137,9 +137,29 @@ export function formatSystemResponse(response: SystemResponse): string {
   const lines: string[] = [];
   
   if (isSystemInitMessage(response)) {
-    lines.push(`${pc.bold('🚀 Session Initialized')}`);
-    lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
-    lines.push(`${pc.dim('Tools:')} ${response.tools.join(', ')}`);
+    // Check for custom environment variables
+    const customTitle = process.env.CCPRETTY_TITLE;
+    const customDescription = process.env.CCPRETTY_DESCRIPTION;
+    const customUrl = process.env.CCPRETTY_URL;
+    
+    if (customTitle || customDescription || customUrl) {
+      // Use custom format
+      if (customTitle) {
+        lines.push(`${pc.bold(`🚀 ${customTitle}`)}`);
+      }
+      if (customDescription) {
+        lines.push(`${pc.dim(customDescription)}`);
+      }
+      if (customUrl) {
+        lines.push(`${pc.dim('URL:')} ${customUrl}`);
+      }
+      lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
+    } else {
+      // Use default format without tools
+      lines.push(`${pc.bold('🚀 Session Initialized')}`);
+      lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
+    }
+    
     if (response.mcp_servers.length > 0) {
       lines.push(`${pc.dim('MCP Servers:')} ${response.mcp_servers.join(', ')}`);
     }
@@ -185,6 +205,42 @@ export function formatResultResponse(data: any): string {
     borderColor: borderColor,
     borderStyle: 'double',
     title: 'result',
+    titleAlignment: 'center'
+  });
+}
+
+export function formatUnknownResponse(data: any): string {
+  const lines: string[] = [];
+  const type = data.type || 'unknown';
+  
+  lines.push(`${pc.bold(`⚠️  Unknown Event Type: ${type}`)}`);
+  lines.push('');
+  lines.push(pc.dim('Full event details:'));
+  lines.push('');
+  
+  // Pretty print the JSON with indentation
+  try {
+    const jsonStr = JSON.stringify(data, null, 2);
+    // Add syntax highlighting to JSON
+    const highlighted = jsonStr
+      .replace(/"([^"]+)":/g, pc.cyan('"$1":')) // Keys
+      .replace(/: "([^"]+)"/g, ': ' + pc.green('"$1"')) // String values
+      .replace(/: (\d+)/g, ': ' + pc.yellow('$1')) // Numbers
+      .replace(/: (true|false)/g, ': ' + pc.magenta('$1')) // Booleans
+      .replace(/: null/g, ': ' + pc.gray('null')); // Null
+    
+    lines.push(highlighted);
+  } catch (error) {
+    // Fallback to simple stringification
+    lines.push(String(data));
+  }
+  
+  // Wrap in a box with warning color
+  return boxen(lines.join('\n'), {
+    padding: 1,
+    borderColor: 'yellow',
+    borderStyle: 'round',
+    title: `unknown: ${type}`,
     titleAlignment: 'center'
   });
 }

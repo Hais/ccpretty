@@ -161,6 +161,8 @@ sequenceDiagram
 - **Interruption handling**: Interrupted tools are marked and displayed appropriately
 - **Deduplication**: Filters out identical consecutive messages
 - **Enhanced UX**: Shows complete tool execution workflows
+- **Immediate messages**: System and result messages bypass queue for instant output
+- **Orphan detection**: Tool uses without results after 30s are marked as orphaned
 
 ```mermaid
 stateDiagram-v2
@@ -283,19 +285,23 @@ flowchart TD
 ### message-queue.ts - Queue Management
 
 Key concepts:
-- **QueuedMessage**: Wrapper for log entries with metadata
-- **ToolPair**: Links tool_use with tool_result
-- **MessageGroup**: Collection of related messages
-- **Sampling**: Periodic processing every 500ms
+- **QueuedMessage**: Wrapper for log entries with metadata (status, timestamp)
+- **ToolPair**: Links tool_use with tool_result, tracks execution time
+- **MessageGroup**: Collection of related messages for batch processing
+- **Sampling**: Periodic processing every 500ms for better UX
 - **Timeout handling**: 30s timeout for orphaned tool uses
+- **Active tool tracking**: Only one tool can be active at a time
+- **Interruption mechanism**: New tool uses interrupt pending ones
 
 ### message-reducer.ts - Message Processing
 
 Key concepts:
-- **Deduplication**: Tracks last output to avoid duplicates
-- **Tool combination**: Merges tool execution into single message
-- **Formatting**: Creates unified output with status indicators
-- **Result truncation**: Limits output length for readability
+- **Deduplication**: Tracks last output to avoid duplicates using content hashing
+- **Tool combination**: Merges tool execution into single message with timing
+- **Formatting**: Creates unified output with status indicators (✅, ❌, ⚠️)
+- **Result truncation**: Limits output to 500 lines for readability
+- **Error handling**: Special formatting for tool errors and interruptions
+- **State management**: Maintains last message state for deduplication
 
 ### slack.ts - Slack Integration
 
@@ -315,12 +321,24 @@ flowchart LR
     G --> I{Message Type?}
     I -->|tool_use| J[Track Tool ID]
     I -->|tool_result| K[Update Tool Message]
-    I -->|Other| L[Regular Post]
+    I -->|assistant| L[Group Messages]
+    I -->|system| M[Session Info]
+    I -->|result| N[Final Status]
     
-    J --> M[Post with Status]
-    K --> N[Update Status]
-    L --> O[Post Message]
+    J --> O[Post with ⏳ Status]
+    K --> P[Update to ✅/❌]
+    L --> Q[Numbered List]
+    M --> R[Tool List]
+    N --> S[Workflow Reaction]
 ```
+
+Key features:
+- **Rich formatting**: Uses Slack Block Kit for structured messages
+- **Live updates**: Tool status changes from ⏳ to ✅/❌ on completion
+- **Message grouping**: Consecutive assistant messages become numbered lists
+- **Deduplication**: Skips identical messages to reduce noise
+- **Thread management**: Saves/loads thread IDs for continuity
+- **Workflow tracking**: Reactions on initial message show overall status
 
 ## Integration Points
 
@@ -360,7 +378,10 @@ flowchart LR
 ## Future Enhancements
 
 1. **Configurable queue intervals**: Allow customization of the 500ms sampling rate
-2. **Message batching strategies**: Group multiple assistant messages intelligently
+2. **Parallel tool execution**: Support for concurrent tool runs when safe
 3. **Plugin architecture**: Support for custom formatters and processors
 4. **Persistent state**: Save and resume sessions across restarts
 5. **WebSocket support**: Real-time streaming to web interfaces
+6. **Advanced filtering**: User-defined rules for message processing
+7. **Export formats**: Support for Markdown, HTML, or JSON output
+8. **Performance metrics**: Track and display queue processing statistics
