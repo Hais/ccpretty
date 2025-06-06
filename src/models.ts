@@ -90,10 +90,35 @@ export interface SystemMessage {
   type: 'system';
   subtype: string;
   session_id: string;
+  session_started?: string;
+  message?: string;
   [key: string]: any;
 }
 
 export type SystemResponse = SystemInitMessage | SystemMessage;
+
+// Result message types
+export interface ResultResponse {
+  type: 'result';
+  subtype: 'success' | 'error';
+  is_error?: boolean;
+  result?: string | {
+    exit_code?: number;
+    session_duration_seconds?: number;
+    api_wall_time_seconds?: number;
+    turns_taken?: number;
+    total_cost_usd?: number;
+    [key: string]: any;
+  };
+  duration_ms: number;
+  duration_api_ms: number;
+  num_turns: number;
+  cost_usd: number;
+  session_id: string;
+}
+
+// Union of all message types
+export type Message = AssistantResponse | UserResponse | SystemResponse | ResultResponse;
 
 // Type guards
 export function isTextContent(content: MessageContent): content is TextContent {
@@ -122,4 +147,8 @@ export function isSystemResponse(response: any): response is SystemResponse {
 
 export function isSystemInitMessage(response: any): response is SystemInitMessage {
   return response?.type === 'system' && response?.subtype === 'init';
+}
+
+export function isResultResponse(response: any): response is ResultResponse {
+  return response?.type === 'result';
 }

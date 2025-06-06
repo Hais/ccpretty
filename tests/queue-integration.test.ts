@@ -8,7 +8,7 @@ jest.mock('../src/formatters', () => ({
 }));
 
 import { MessageQueue, MessageGroup } from '../src/message-queue';
-import { MessageReducer, ProcessedMessage } from '../src/message-reducer';
+import { MessageReducer, ReducedMessage } from '../src/message-reducer';
 
 describe('Queue Integration Tests', () => {
   let messageQueue: MessageQueue;
@@ -80,11 +80,9 @@ describe('Queue Integration Tests', () => {
       // Reduce and check output
       const reduced = messageReducer.reduceGroups(processedGroups);
       expect(reduced).toHaveLength(1);
-      expect(reduced[0].type).toBe('tool_complete');
-      expect(reduced[0].content).toContain('✅ Tool: Bash - COMPLETED');
-      expect(reduced[0].content).toContain('Command: ls -la');
-      expect(reduced[0].content).toContain('Description: List files');
-      expect(reduced[0].content).toContain('Result: file1.txt');
+      expect(reduced[0].metadata.type).toBe('tool_complete');
+      expect(reduced[0].metadata.toolName).toBe('Bash');
+      expect(reduced[0].metadata.toolStatus).toBe('completed');
     });
 
     it('should handle tool errors correctly', async () => {
@@ -132,9 +130,9 @@ describe('Queue Integration Tests', () => {
 
       const reduced = messageReducer.reduceGroups(processedGroups);
       expect(reduced).toHaveLength(1);
-      expect(reduced[0].type).toBe('tool_failed');
-      expect(reduced[0].content).toContain('❌ Tool: Bash - FAILED');
-      expect(reduced[0].content).toContain('🚨 Error: Command not found');
+      expect(reduced[0].metadata.type).toBe('tool_failed');
+      expect(reduced[0].metadata.toolName).toBe('Bash');
+      expect(reduced[0].metadata.toolStatus).toBe('failed');
     });
   });
 
@@ -145,6 +143,9 @@ describe('Queue Integration Tests', () => {
         type: 'assistant',
         message: {
           id: 'msg_3',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-3-sonnet',
           content: [{
             type: 'tool_use',
             id: 'tool_first',
@@ -153,7 +154,10 @@ describe('Queue Integration Tests', () => {
               file_path: '/path/to/file.txt'
             }
           }],
-          stop_reason: 'tool_use'
+          stop_reason: 'tool_use',
+          stop_sequence: null,
+          usage: { input_tokens: 100, output_tokens: 20 },
+          ttftMs: 500
         },
         session_id: 'test'
       };
@@ -162,6 +166,9 @@ describe('Queue Integration Tests', () => {
         type: 'assistant',
         message: {
           id: 'msg_4',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-3-sonnet',
           content: [{
             type: 'tool_use',
             id: 'tool_second',
@@ -171,7 +178,10 @@ describe('Queue Integration Tests', () => {
               description: 'Get current directory'
             }
           }],
-          stop_reason: 'tool_use'
+          stop_reason: 'tool_use',
+          stop_sequence: null,
+          usage: { input_tokens: 100, output_tokens: 20 },
+          ttftMs: 500
         },
         session_id: 'test'
       };
@@ -211,13 +221,14 @@ describe('Queue Integration Tests', () => {
       expect(reduced).toHaveLength(2);
       
       // First reduced message should be interrupted
-      expect(reduced[0].type).toBe('tool_interrupted');
-      expect(reduced[0].content).toContain('⚠️ Tool: Read - INTERRUPTED');
-      expect(reduced[0].content).toContain('🚫 Tool execution was interrupted');
+      expect(reduced[0].metadata.type).toBe('tool_interrupted');
+      expect(reduced[0].metadata.toolName).toBe('Read');
+      expect(reduced[0].metadata.toolStatus).toBe('interrupted');
       
       // Second reduced message should be completed
-      expect(reduced[1].type).toBe('tool_complete');
-      expect(reduced[1].content).toContain('✅ Tool: Bash - COMPLETED');
+      expect(reduced[1].metadata.type).toBe('tool_complete');
+      expect(reduced[1].metadata.toolName).toBe('Bash');
+      expect(reduced[1].metadata.toolStatus).toBe('completed');
     });
 
     it('should handle multiple interruptions', async () => {
@@ -289,14 +300,14 @@ describe('Queue Integration Tests', () => {
       expect(reduced).toHaveLength(3);
       
       // Check interruption messages
-      expect(reduced[0].type).toBe('tool_interrupted');
-      expect(reduced[0].content).toContain('Read - INTERRUPTED');
+      expect(reduced[0].metadata.type).toBe('tool_interrupted');
+      expect(reduced[0].metadata.toolName).toBe('Read');
       
-      expect(reduced[1].type).toBe('tool_interrupted');
-      expect(reduced[1].content).toContain('Write - INTERRUPTED');
+      expect(reduced[1].metadata.type).toBe('tool_interrupted');
+      expect(reduced[1].metadata.toolName).toBe('Write');
       
-      expect(reduced[2].type).toBe('tool_complete');
-      expect(reduced[2].content).toContain('Bash - COMPLETED');
+      expect(reduced[2].metadata.type).toBe('tool_complete');
+      expect(reduced[2].metadata.toolName).toBe('Bash');
     });
   });
 
@@ -316,7 +327,7 @@ describe('Queue Integration Tests', () => {
         session_id: 'test'
       };
 
-      const message2 = { ...message1, message: { ...message1.message, id: 'msg_9' } };
+      const message2 = { ...message1 }; // Exact duplicate
 
       // Act
       messageQueue.enqueue(message1);
@@ -462,10 +473,10 @@ describe('Queue Integration Tests', () => {
       expect(reduced.length).toBeGreaterThanOrEqual(3);
       
       // Find the tool completion in reduced messages
-      const toolMessage = reduced.find(r => r.type === 'tool_complete');
+      const toolMessage = reduced.find(r => r.metadata.type === 'tool_complete');
       expect(toolMessage).toBeDefined();
-      expect(toolMessage?.content).toContain('Bash - COMPLETED');
-      expect(toolMessage?.content).toContain('task complete');
+      expect(toolMessage?.metadata.toolName).toBe('Bash');
+      expect(toolMessage?.metadata.toolStatus).toBe('completed');
     });
 
     it('should handle rapid fire tool calls', async () => {
@@ -524,13 +535,13 @@ describe('Queue Integration Tests', () => {
       
       // First 4 should be interrupted
       for (let i = 0; i < 4; i++) {
-        expect(reduced[i].type).toBe('tool_interrupted');
-        expect(reduced[i].content).toContain('INTERRUPTED');
+        expect(reduced[i].metadata.type).toBe('tool_interrupted');
+        expect(reduced[i].metadata.toolStatus).toBe('interrupted');
       }
       
       // Last should be completed
-      expect(reduced[4].type).toBe('tool_complete');
-      expect(reduced[4].content).toContain('COMPLETED');
+      expect(reduced[4].metadata.type).toBe('tool_complete');
+      expect(reduced[4].metadata.toolStatus).toBe('completed');
     });
   });
 
@@ -566,8 +577,8 @@ describe('Queue Integration Tests', () => {
 
       const reduced = messageReducer.reduceGroups(processedGroups);
       expect(reduced).toHaveLength(1);
-      // Should be formatted as interrupted since it never completed
-      expect(reduced[0].content).toContain('Read');
+      // Should be formatted as single message since it never completed
+      expect(reduced[0].metadata.type).toBe('single');
     });
 
     it('should handle malformed tool messages', async () => {
@@ -600,7 +611,7 @@ describe('Queue Integration Tests', () => {
       const reduced = messageReducer.reduceGroups(processedGroups);
       expect(reduced).toHaveLength(1);
       // Should use standard formatting since tool processing failed
-      expect(reduced[0].type).toBe('single');
+      expect(reduced[0].metadata.type).toBe('single');
     });
   });
 });

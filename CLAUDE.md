@@ -8,10 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Development**: `npm run dev` - Runs TypeScript compiler in watch mode
 - **Test CLI**: `npm run ccpretty` - Run the compiled CLI tool locally
 - **Install as CLI**: `npm install -g .` - Install globally to use `ccpretty` command
-- **With Slack**: Set environment variables to enable Slack integration:
-  - `export CCPRETTY_SLACK_TOKEN=xoxb-your-token`
-  - `export CCPRETTY_SLACK_CHANNEL=#channel-name`
-  - `export CCPRETTY_SLACK_THREAD_TS=1234567890.123456` (optional, to post to existing thread)
+- **With Slack**: Set environment variables to enable Slack integration. You can use either:
+  - Environment variables: `export CCPRETTY_SLACK_TOKEN=xoxb-your-token` etc.
+  - Local `.env` file in project directory with environment variables
+  - Global `~/.ccpretty.env` file for system-wide configuration
+  - See `.env.example` for available environment variables
 - **Resume Slack Thread**: `ccpretty --resume-slack-thread` - Resume posting to the last used thread
 - **Queue Processing**: `ccpretty --queue` - Enable experimental queue-based processing with tool pairing and deduplication
 

@@ -40,7 +40,7 @@ export class MessageQueue {
   private readonly TOOL_TIMEOUT_MS = 30000; // 30s timeout for tool completion
   private readonly MAX_QUEUE_SIZE = 1000; // Prevent memory issues
   
-  constructor(private onProcessMessages: (groups: MessageGroup[]) => void) {}
+  constructor(private onProcessMessages: (groups: MessageGroup[]) => void | Promise<void>) {}
   
   /**
    * Add a message to the queue

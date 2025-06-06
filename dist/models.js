@@ -7,6 +7,7 @@ exports.isAssistantResponse = isAssistantResponse;
 exports.isUserResponse = isUserResponse;
 exports.isSystemResponse = isSystemResponse;
 exports.isSystemInitMessage = isSystemInitMessage;
+exports.isResultResponse = isResultResponse;
 // Type guards
 function isTextContent(content) {
     return content.type === 'text';
@@ -28,4 +29,7 @@ function isSystemResponse(response) {
 }
 function isSystemInitMessage(response) {
     return response?.type === 'system' && response?.subtype === 'init';
+}
+function isResultResponse(response) {
+    return response?.type === 'result';
 }

@@ -1,41 +1,42 @@
-import { MessageGroup, ToolPair } from './message-queue';
+import { MessageGroup } from './message-queue';
 import { 
-  formatAssistantResponse,
-  formatUserResponse,
-  formatSystemResponse,
-  formatResultResponse,
-} from './formatters';
-import { 
+  Message,
   isAssistantResponse, 
   isUserResponse, 
   isSystemResponse,
-  isTextContent,
-  isToolUseContent,
   AssistantResponse,
   UserResponse,
   SystemResponse
 } from './models';
 
-export interface ProcessedMessage {
-  content: string;
-  type: 'single' | 'tool_complete' | 'tool_failed' | 'tool_interrupted';
-  originalCount: number;
-  duration?: number;
+export interface ReducedMessage {
+  message: Message;
+  metadata: {
+    type: 'single' | 'tool_complete' | 'tool_failed' | 'tool_interrupted';
+    originalCount: number;
+    duration?: number;
+    toolName?: string;
+    toolStatus?: 'completed' | 'failed' | 'interrupted';
+    toolResult?: any;
+  };
+  // Compatibility properties for tests
+  type?: string;
+  content?: string;
 }
 
 export class MessageReducer {
-  private lastContent: string = '';
+  private lastMessageHash: string = '';
   
   /**
-   * Reduce message groups into formatted output
+   * Reduce message groups into simplified messages with metadata
    */
-  reduceGroups(groups: MessageGroup[]): ProcessedMessage[] {
-    const results: ProcessedMessage[] = [];
+  reduceGroups(groups: MessageGroup[]): ReducedMessage[] {
+    const results: ReducedMessage[] = [];
     
     for (const group of groups) {
-      const processed = this.reduceGroup(group);
-      if (processed && this.shouldOutput(processed.content)) {
-        results.push(processed);
+      const reduced = this.reduceGroup(group);
+      if (reduced && this.shouldInclude(reduced)) {
+        results.push(reduced);
       }
     }
     
@@ -45,7 +46,7 @@ export class MessageReducer {
   /**
    * Reduce a single message group
    */
-  private reduceGroup(group: MessageGroup): ProcessedMessage | null {
+  private reduceGroup(group: MessageGroup): ReducedMessage | null {
     switch (group.type) {
       case 'tool_pair':
         return this.reduceToolPair(group);
@@ -61,7 +62,7 @@ export class MessageReducer {
   /**
    * Reduce a tool pair (tool_use + tool_result)
    */
-  private reduceToolPair(group: MessageGroup): ProcessedMessage {
+  private reduceToolPair(group: MessageGroup): ReducedMessage {
     const { toolPair } = group;
     if (!toolPair || !toolPair.toolResult) {
       // Fallback to single message if no result
@@ -77,54 +78,56 @@ export class MessageReducer {
     const toolResult = toolResultEntry.message.content.find((c: any) => c.type === 'tool_result');
     
     const isError = toolResult?.is_error || false;
-    const status = isError ? 'FAILED' : 'COMPLETED';
-    const statusIcon = isError ? '❌' : '✅';
+    const status = isError ? 'failed' : 'completed';
     
-    // Format tool execution summary
-    let content = this.formatToolHeader(toolPair.toolName, status, statusIcon, duration);
+    // Create a synthetic message that represents the tool execution
+    const syntheticMessage: AssistantResponse = {
+      type: 'assistant',
+      message: {
+        id: toolUseEntry.id || 'synthetic-' + Date.now(),
+        type: 'message',
+        role: 'assistant',
+        model: toolUseEntry.model || 'unknown',
+        content: [
+          {
+            type: 'tool_use',
+            id: toolUse.id,
+            name: toolPair.toolName,
+            input: toolUse.input
+          }
+        ],
+        stop_reason: 'tool_use',
+        stop_sequence: null,
+        usage: toolUseEntry.usage || { input_tokens: 0, output_tokens: 0 },
+        ttftMs: 0
+      },
+      session_id: toolUseEntry.session_id || ''
+    } as any;
     
-    // Add tool parameters
-    if (toolUse?.input) {
-      content += this.formatToolParameters(toolUse.input);
-    }
+    // Add toolResult as additional metadata
+    (syntheticMessage as any).toolResult = toolResult;
     
-    // Add result summary (truncated)
-    if (toolResult?.content && !isError) {
-      const resultText = typeof toolResult.content === 'string' 
-        ? toolResult.content 
-        : JSON.stringify(toolResult.content);
-      
-      if (resultText.length > 200) {
-        content += `\n\n📄 Result: ${resultText.substring(0, 197)}...`;
-      } else if (resultText.trim()) {
-        content += `\n\n📄 Result: ${resultText}`;
+    const reduced = {
+      message: syntheticMessage,
+      metadata: {
+        type: (isError ? 'tool_failed' : 'tool_complete') as 'tool_failed' | 'tool_complete',
+        originalCount: 2,
+        duration,
+        toolName: toolPair.toolName,
+        toolStatus: status as 'completed' | 'failed',
+        toolResult: toolResult?.content
       }
-    }
-    
-    // Add error details
-    if (isError && toolResult?.content) {
-      const errorText = typeof toolResult.content === 'string' 
-        ? toolResult.content 
-        : JSON.stringify(toolResult.content);
-      content += `\n\n🚨 Error: ${errorText.substring(0, 300)}`;
-    }
-    
-    return {
-      content: this.wrapInBox(content, 'tool'),
-      type: isError ? 'tool_failed' : 'tool_complete',
-      originalCount: 2,
-      duration
     };
+    
+    return this.addCompatibilityProperties(reduced);
   }
   
   /**
    * Reduce a single message
    */
-  private reduceSingleMessage(group: MessageGroup): ProcessedMessage {
+  private reduceSingleMessage(group: MessageGroup): ReducedMessage {
     const message = group.messages[0];
     const logEntry = message.logEntry;
-    
-    let content: string;
     
     // Check if this is an interrupted tool
     if (isAssistantResponse(logEntry)) {
@@ -132,131 +135,89 @@ export class MessageReducer {
       const toolUse = assistantContent.find((c: any) => c.type === 'tool_use');
       
       if (toolUse) {
-        // This is an interrupted tool - format specially
-        const statusIcon = '⚠️';
-        const toolName = toolUse.name;
-        
-        let interruptedContent = `${statusIcon} Tool: ${toolName} - INTERRUPTED`;
-        
-        // Add tool parameters
-        if (toolUse.input) {
-          interruptedContent += this.formatToolParameters(toolUse.input);
-        }
-        
-        interruptedContent += '\n\n🚫 Tool execution was interrupted by a new tool request';
-        
-        content = this.wrapInBox(interruptedContent, 'interrupted');
-        
-        return {
-          content,
-          type: 'tool_interrupted',
-          originalCount: 1
+        // This is an interrupted tool
+        const reduced = {
+          message: logEntry as Message,
+          metadata: {
+            type: 'tool_interrupted' as const,
+            originalCount: 1,
+            toolName: toolUse.name,
+            toolStatus: 'interrupted' as const
+          }
         };
-      } else {
-        content = formatAssistantResponse(logEntry as AssistantResponse);
+        
+        return this.addCompatibilityProperties(reduced);
       }
-    } else if (isUserResponse(logEntry)) {
-      content = formatUserResponse(logEntry as UserResponse);
-    } else if (isSystemResponse(logEntry)) {
-      content = formatSystemResponse(logEntry as SystemResponse);
-    } else if (logEntry.type === 'result') {
-      content = formatResultResponse(logEntry);
-    } else {
-      content = `Unknown message type: ${logEntry.type || 'undefined'}`;
     }
     
-    return {
-      content,
-      type: 'single',
-      originalCount: 1
+    const reduced = {
+      message: logEntry as Message,
+      metadata: {
+        type: 'single' as const,
+        originalCount: 1
+      }
     };
+    
+    return this.addCompatibilityProperties(reduced);
   }
   
   /**
    * Reduce a batch of assistant messages
    */
-  private reduceAssistantBatch(group: MessageGroup): ProcessedMessage {
+  private reduceAssistantBatch(group: MessageGroup): ReducedMessage {
     // For now, just process each message separately
     // Could be enhanced to combine multiple assistant messages
     return this.reduceSingleMessage(group);
   }
   
   /**
-   * Format tool header with status
+   * Add compatibility properties for backwards compatibility with tests
    */
-  private formatToolHeader(toolName: string, status: string, icon: string, duration: number): string {
-    const durationStr = duration ? ` (${(duration / 1000).toFixed(2)}s)` : '';
-    return `${icon} Tool: ${toolName} - ${status}${durationStr}`;
+  private addCompatibilityProperties(reduced: ReducedMessage): ReducedMessage {
+    // Set type for compatibility
+    reduced.type = reduced.metadata.type;
+    
+    // Generate content for compatibility
+    if (reduced.metadata.type === 'tool_complete') {
+      reduced.content = `✅ Tool: ${reduced.metadata.toolName} - COMPLETED`;
+    } else if (reduced.metadata.type === 'tool_failed') {
+      reduced.content = `❌ Tool: ${reduced.metadata.toolName} - FAILED`;
+    } else if (reduced.metadata.type === 'tool_interrupted') {
+      reduced.content = `⚠️ Tool: ${reduced.metadata.toolName} - INTERRUPTED`;
+    } else {
+      // For single messages, try to extract content from the message
+      const message = reduced.message as any;
+      if (message.message?.content) {
+        const textContent = message.message.content.find((c: any) => c.type === 'text');
+        if (textContent) {
+          reduced.content = textContent.text;
+        }
+      }
+    }
+    
+    return reduced;
   }
   
   /**
-   * Format tool parameters
+   * Generate a hash for deduplication
    */
-  private formatToolParameters(input: any): string {
-    let params = '';
-    
-    if (input.command) {
-      params += `\n🔧 Command: ${input.command}`;
-    }
-    
-    if (input.file_path) {
-      params += `\n📁 File: ${input.file_path}`;
-    }
-    
-    if (input.pattern) {
-      params += `\n🔍 Pattern: ${input.pattern}`;
-    }
-    
-    if (input.description) {
-      params += `\n📝 Description: ${input.description}`;
-    }
-    
-    // Add other common parameters
-    if (input.limit) {
-      params += `\n📊 Limit: ${input.limit}`;
-    }
-    
-    if (input.offset) {
-      params += `\n📍 Offset: ${input.offset}`;
-    }
-    
-    if (input.timeout) {
-      params += `\n⏱️ Timeout: ${input.timeout}ms`;
-    }
-    
-    return params;
+  private generateHash(message: Message): string {
+    // Simple hash based on message type and content
+    return `${message.type}:${JSON.stringify(message)}`;
   }
   
   /**
-   * Wrap content in a simple box
+   * Check if message should be included (deduplication)
    */
-  private wrapInBox(content: string, type: string): string {
-    const lines = content.split('\n');
-    const maxLength = Math.max(...lines.map(line => line.length), type.length + 4);
-    const width = Math.min(maxLength + 4, 80);
+  private shouldInclude(reduced: ReducedMessage): boolean {
+    const hash = this.generateHash(reduced.message);
     
-    const border = '═'.repeat(width - 2);
-    const header = `╔${'═'.repeat((width - type.length - 4) / 2)} ${type} ${'═'.repeat((width - type.length - 4) / 2)}╗`;
-    const footer = `╚${border}╝`;
-    
-    const wrappedLines = lines.map(line => {
-      const padding = ' '.repeat(Math.max(0, width - line.length - 4));
-      return `║  ${line}${padding}  ║`;
-    });
-    
-    return [header, '║' + ' '.repeat(width - 2) + '║', ...wrappedLines, '║' + ' '.repeat(width - 2) + '║', footer].join('\n');
-  }
-  
-  /**
-   * Check if content should be output (deduplication)
-   */
-  private shouldOutput(content: string): boolean {
-    // Simple deduplication - skip if identical to last content
-    if (content === this.lastContent) {
+    // Skip if identical to last message
+    if (hash === this.lastMessageHash) {
       return false;
     }
     
-    this.lastContent = content;
+    this.lastMessageHash = hash;
     return true;
   }
   
@@ -264,6 +225,6 @@ export class MessageReducer {
    * Reset deduplication state
    */
   reset(): void {
-    this.lastContent = '';
+    this.lastMessageHash = '';
   }
 }
