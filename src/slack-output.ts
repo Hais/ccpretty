@@ -134,22 +134,39 @@ export class SlackOutput {
     const wasPostableType = this.lastMessageType && this.lastMessageType !== 'user';
     
     if (wasPostableType && isPostableType && this.lastMessageType !== currentType) {
-      await this.flushPendingMessages();
-      
-      // Add divider between different message types 
-      await this.postDivider();
+      try {
+        await this.flushPendingMessages();
+        
+        // Add divider between different message types 
+        await this.postDivider();
+      } catch (error) {
+        console.error('Error flushing pending messages or posting divider:', error);
+        if (process.env.CCPRETTY_DEBUG) {
+          console.error('Context: switching from', this.lastMessageType, 'to', currentType);
+        }
+        // Continue processing despite flush/divider errors
+      }
     }
     
     // Handle different message types
-    if (isSystemResponse(message)) {
-      await this.handleSystemMessage(message as SystemResponse);
-    } else if (isAssistantResponse(message)) {
-      await this.handleAssistantMessage(message as AssistantResponse, metadata);
-    } else if (message.type === 'result') {
-      await this.handleResultMessage(message as ResultResponse);
-    } else if (isUserResponse(message)) {
-      // Handle user messages that contain tool results
-      await this.handleUserMessage(message as UserResponse);
+    try {
+      if (isSystemResponse(message)) {
+        await this.handleSystemMessage(message as SystemResponse);
+      } else if (isAssistantResponse(message)) {
+        await this.handleAssistantMessage(message as AssistantResponse, metadata);
+      } else if (message.type === 'result') {
+        await this.handleResultMessage(message as ResultResponse);
+      } else if (isUserResponse(message)) {
+        // Handle user messages that contain tool results
+        await this.handleUserMessage(message as UserResponse);
+      }
+    } catch (error) {
+      console.error('Error handling specific message type:', error);
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('Message type:', currentType);
+        console.error('Metadata:', JSON.stringify(metadata, null, 2));
+      }
+      // Continue processing despite message handling errors
     }
     
     // Update last message type (only for postable types)
@@ -260,15 +277,37 @@ export class SlackOutput {
     const contents = response.message?.content || [];
     const toolUse = contents.find((c: any) => c.type === 'tool_use');
     
-    if (!toolUse) return;
+    if (!toolUse) {
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('[SlackOutput] No tool_use content found in tool execution message');
+      }
+      return;
+    }
     
     const toolId = (toolUse as any).id;
+    if (!toolId) {
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('[SlackOutput] No tool ID found in tool_use content');
+      }
+      return;
+    }
+    
     const existingMessageTs = this.toolMessages.get(toolId);
     
-    const blocks = this.createToolBlocks(toolName, toolStatus, duration, (toolUse as any).input, toolResult);
+    // Validate that we can create blocks before proceeding
+    let blocks;
+    try {
+      blocks = this.createToolBlocks(toolName, toolStatus, duration, (toolUse as any).input, toolResult);
+    } catch (error) {
+      console.error('Error creating tool blocks:', error);
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('Tool execution context:', { toolName, toolStatus, toolId });
+      }
+      return;
+    }
     
     try {
-      if (existingMessageTs) {
+      if (existingMessageTs && existingMessageTs !== 'pending') {
         // Update existing message
         const updatePayload = {
           channel: this.config.channel,

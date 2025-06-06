@@ -63,8 +63,15 @@ export class MessageReducer {
    * Reduce a tool pair (tool_use + tool_result)
    */
   private reduceToolPair(group: MessageGroup): ReducedMessage {
+    if (process.env.CCPRETTY_DEBUG) {
+      console.error(`[MessageReducer] Reducing tool pair for tool: ${group.toolPair?.toolName || 'unknown'}`);
+    }
+    
     const { toolPair } = group;
     if (!toolPair || !toolPair.toolResult) {
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error(`[MessageReducer] Incomplete tool pair, falling back to single message`);
+      }
       // Fallback to single message if no result
       return this.reduceSingleMessage(group);
     }
@@ -72,6 +79,10 @@ export class MessageReducer {
     const duration = group.endTime - group.startTime;
     const toolUseEntry = toolPair.toolUse.logEntry as any;
     const toolResultEntry = toolPair.toolResult.logEntry as any;
+    
+    if (process.env.CCPRETTY_DEBUG) {
+      console.error(`[MessageReducer] Tool pair duration: ${duration}ms`);
+    }
     
     // Extract tool information
     const toolUse = toolUseEntry.message.content.find((c: any) => c.type === 'tool_use');

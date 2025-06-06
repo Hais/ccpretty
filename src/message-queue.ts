@@ -188,12 +188,12 @@ export class MessageQueue {
     }
     
     // If there's already an active tool, mark it as interrupted
-    const interruptedGroups: MessageGroup[] = [];
+    let interruptedGroup: MessageGroup | null = null;
     if (this.currentActiveTool && !this.currentActiveTool.toolResult) {
       this.currentActiveTool.interrupted = true;
       
       // Create a group for the interrupted tool
-      const interruptedGroup: MessageGroup = {
+      interruptedGroup = {
         type: 'single',
         messages: [this.currentActiveTool.toolUse],
         startTime: this.currentActiveTool.startTime,
@@ -203,9 +203,6 @@ export class MessageQueue {
       // Mark as processed and remove from pending
       this.currentActiveTool.toolUse.processed = true;
       this.pendingToolUses.delete(this.currentActiveTool.toolId);
-      
-      // Process the interrupted tool immediately
-      this.onProcessMessages([interruptedGroup]);
     }
     
     // Create a new tool pair for the current tool
@@ -220,8 +217,9 @@ export class MessageQueue {
     this.currentActiveTool = toolPair;
     this.pendingToolUses.set(toolUse.id, toolPair);
     
-    // Don't create a group yet - wait for tool_result
-    return null;
+    // Return the interrupted group if any - this will be processed in the main queue loop
+    // instead of triggering immediate recursive processing
+    return interruptedGroup;
   }
   
   /**

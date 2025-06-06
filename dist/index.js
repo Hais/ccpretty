@@ -119,23 +119,42 @@ async function main() {
             try {
                 if (!messageReducer)
                     return;
+                if (process.env.CCPRETTY_DEBUG) {
+                    console.error(`[MessageQueue] Processing ${groups.length} groups`);
+                }
                 const reducedMessages = messageReducer.reduceGroups(groups);
-                for (const reduced of reducedMessages) {
+                if (process.env.CCPRETTY_DEBUG) {
+                    console.error(`[MessageQueue] Reduced to ${reducedMessages.length} messages`);
+                }
+                for (let i = 0; i < reducedMessages.length; i++) {
+                    const reduced = reducedMessages[i];
                     try {
+                        if (process.env.CCPRETTY_DEBUG) {
+                            console.error(`[MessageQueue] Processing message ${i + 1}/${reducedMessages.length}: ${reduced.message.type} (${reduced.metadata.type})`);
+                        }
                         // Output to terminal
                         terminalOutput.output(reduced);
                         // Output to Slack if configured
                         if (slackOutput) {
+                            if (process.env.CCPRETTY_DEBUG) {
+                                console.error(`[MessageQueue] Sending to Slack: ${reduced.message.type} (${reduced.metadata.type})`);
+                            }
                             await slackOutput.output(reduced);
+                            if (process.env.CCPRETTY_DEBUG) {
+                                console.error(`[MessageQueue] Slack processing complete for message ${i + 1}`);
+                            }
                         }
                     }
                     catch (error) {
                         // Log message output errors but continue
-                        console.error('Error outputting message:', error);
+                        console.error(`Error outputting message ${i + 1}/${reducedMessages.length}:`, error);
                         if (process.env.CCPRETTY_DEBUG) {
                             console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
                         }
                     }
+                }
+                if (process.env.CCPRETTY_DEBUG) {
+                    console.error(`[MessageQueue] Completed processing ${groups.length} groups`);
                 }
             }
             catch (error) {

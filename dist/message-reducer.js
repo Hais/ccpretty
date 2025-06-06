@@ -38,14 +38,23 @@ class MessageReducer {
      * Reduce a tool pair (tool_use + tool_result)
      */
     reduceToolPair(group) {
+        if (process.env.CCPRETTY_DEBUG) {
+            console.error(`[MessageReducer] Reducing tool pair for tool: ${group.toolPair?.toolName || 'unknown'}`);
+        }
         const { toolPair } = group;
         if (!toolPair || !toolPair.toolResult) {
+            if (process.env.CCPRETTY_DEBUG) {
+                console.error(`[MessageReducer] Incomplete tool pair, falling back to single message`);
+            }
             // Fallback to single message if no result
             return this.reduceSingleMessage(group);
         }
         const duration = group.endTime - group.startTime;
         const toolUseEntry = toolPair.toolUse.logEntry;
         const toolResultEntry = toolPair.toolResult.logEntry;
+        if (process.env.CCPRETTY_DEBUG) {
+            console.error(`[MessageReducer] Tool pair duration: ${duration}ms`);
+        }
         // Extract tool information
         const toolUse = toolUseEntry.message.content.find((c) => c.type === 'tool_use');
         const toolResult = toolResultEntry.message.content.find((c) => c.type === 'tool_result');
