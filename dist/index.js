@@ -167,13 +167,50 @@ async function main() {
         });
         messageQueue.start();
     }
+    // Handle process termination signals
+    const handleTermination = async (signal) => {
+        console.error(`\nReceived ${signal}, cleaning up...`);
+        try {
+            if (messageQueue) {
+                messageQueue.stop();
+            }
+            if (slackOutput) {
+                await slackOutput.waitForCompletion();
+            }
+            process.exit(0);
+        }
+        catch (error) {
+            console.error('Error during signal cleanup:', error);
+            process.exit(1);
+        }
+    };
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
         terminal: false
     });
+    // Add a timeout to detect if Claude Code stops sending data
+    let lastActivity = Date.now();
+    let activityTimer;
+    const resetActivityTimer = () => {
+        lastActivity = Date.now();
+        if (activityTimer) {
+            clearTimeout(activityTimer);
+        }
+        // Set a 30-second timeout for stdin activity
+        activityTimer = setTimeout(() => {
+            const inactiveTime = Date.now() - lastActivity;
+            if (inactiveTime > 30000) {
+                console.error(`No input received for ${Math.round(inactiveTime / 1000)}s. Upstream process may have crashed.`);
+                handleTermination('TIMEOUT');
+            }
+        }, 30000);
+    };
+    resetActivityTimer();
     rl.on('line', async (line) => {
         try {
+            // Reset activity timer since we received input
+            resetActivityTimer();
             // Parse line for JSON messages
             const messages = inputParser.parseLine(line);
             for (const message of messages) {
@@ -216,6 +253,7 @@ async function main() {
             }
         }
     });
+    // Handle stdin end/close
     rl.on('close', async () => {
         try {
             // Stop queue processing if enabled
@@ -238,6 +276,18 @@ async function main() {
             console.error('Error during cleanup:', error);
             process.exit(1);
         }
+    });
+    process.on('SIGINT', () => handleTermination('SIGINT'));
+    process.on('SIGTERM', () => handleTermination('SIGTERM'));
+    // Handle stdin errors (like when Claude Code crashes)
+    process.stdin.on('error', (error) => {
+        console.error('Stdin error (upstream process may have crashed):', error);
+        handleTermination('STDIN_ERROR');
+    });
+    // Handle unexpected process exit
+    process.on('disconnect', () => {
+        console.error('Process disconnected (upstream process may have crashed)');
+        handleTermination('DISCONNECT');
     });
 }
 main().catch((error) => {

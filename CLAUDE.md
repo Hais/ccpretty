@@ -110,3 +110,25 @@ The tool includes robust error handling to prevent crashes when processing malfo
 - **Debug information**: Set `CCPRETTY_DEBUG=1` to see detailed error information and problematic message content
 
 This ensures that ccpretty continues processing even when encountering issues from Claude Code or other upstream sources.
+
+### Handling Claude Code Crashes
+
+When Claude Code crashes with errors like "Expected content to be an assistant message, but got user", ccpretty includes several mechanisms to handle the situation gracefully:
+
+- **Timeout Detection**: If no input is received for 30 seconds, ccpretty assumes the upstream process crashed
+- **Signal Handling**: Properly handles SIGINT, SIGTERM, and other termination signals
+- **Stdin Error Detection**: Detects when the input stream is broken due to upstream crashes
+- **Automatic Finalization**: Completes Slack sessions even when no proper result message is received
+
+### Helper Script
+
+Use `run-with-claude.sh` to automatically handle Claude Code crashes:
+
+```bash
+./run-with-claude.sh claude <your-claude-command>
+```
+
+This script will:
+- Capture Claude Code output to a temporary file
+- Run ccpretty on the output even if Claude Code crashes
+- Provide clear error reporting for both Claude Code and ccpretty failures
