@@ -867,8 +867,56 @@ export class SlackOutput {
     // First flush any pending messages
     await this.flushPendingMessages();
     
-    // Then wait for rate limiter to finish
-    await this.rateLimiter.waitForCompletion();
+    // If we have an initial message but haven't posted a result, finalize with neutral status
+    if (this.initialMessageTs && this.lastMessageType !== 'result') {
+      await this.finalizeSessionWithoutResult();
+    }
+    
+    // Then wait for rate limiter to finish with a timeout
+    await Promise.race([
+      this.rateLimiter.waitForCompletion(),
+      new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
+    ]);
+  }
+  
+  /**
+   * Finalize Slack session when no result message is received
+   */
+  private async finalizeSessionWithoutResult(): Promise<void> {
+    if (!this.initialMessageTs) return;
+    
+    try {
+      // Remove rocket emoji
+      const removePayload = {
+        channel: this.config.channel,
+        timestamp: this.initialMessageTs,
+        name: 'rocket'
+      };
+      
+      this.logSlackCall('reactions.remove', removePayload);
+      
+      await this.rateLimiter.execute(() =>
+        this.client.reactions.remove(removePayload)
+      );
+      
+      // Add completion emoji (checkmark since no explicit failure)
+      const addPayload = {
+        channel: this.config.channel,
+        timestamp: this.initialMessageTs,
+        name: 'white_check_mark'
+      };
+      
+      this.logSlackCall('reactions.add', addPayload);
+      
+      await this.rateLimiter.execute(() =>
+        this.client.reactions.add(addPayload)
+      );
+    } catch (error) {
+      // Ignore finalization errors
+      if (process.env.CCPRETTY_DEBUG) {
+        console.error('Error finalizing Slack session:', error);
+      }
+    }
   }
   
   /**
