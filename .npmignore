@@ -1,0 +1,34 @@
+# Source files
+src/
+tests/
+fixtures/
+
+# Config files
+.env
+.env.*
+.vscode/
+*.log
+tsconfig.json
+tsconfig.test.json
+jest.config.js
+
+# Development scripts
+test-*.sh
+run-with-claude.sh
+
+# Documentation source
+docs/
+
+# Git files
+.git/
+.gitignore
+
+# Misc
+.DS_Store
+*.swp
+*.swo
+coverage/
+
+# Keep TypeScript definitions
+!dist/*.d.ts
+!dist/*.d.ts.map

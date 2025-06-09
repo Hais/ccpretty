@@ -16,6 +16,14 @@ import {
   isSystemResponse
 } from './models';
 
+// Export public API
+export { runWithClaude, RunWithClaudeOptions, RunWithClaudeResult } from './run-with-claude';
+export * from './models';
+export * from './formatters';
+export * from './slack';
+export * from './message-queue';
+export * from './message-reducer';
+
 interface CliConfig {
   slack?: {
     token: string;

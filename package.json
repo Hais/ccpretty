@@ -2,8 +2,46 @@
   "name": "@hais/ccpretty",
   "version": "1.1.1",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "ccpretty": "dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./formatters": {
+      "import": "./dist/formatters.js",
+      "require": "./dist/formatters.js",
+      "types": "./dist/formatters.d.ts"
+    },
+    "./models": {
+      "import": "./dist/models.js",
+      "require": "./dist/models.js",
+      "types": "./dist/models.d.ts"
+    },
+    "./slack": {
+      "import": "./dist/slack.js",
+      "require": "./dist/slack.js",
+      "types": "./dist/slack.d.ts"
+    },
+    "./message-queue": {
+      "import": "./dist/message-queue.js",
+      "require": "./dist/message-queue.js",
+      "types": "./dist/message-queue.d.ts"
+    },
+    "./message-reducer": {
+      "import": "./dist/message-reducer.js",
+      "require": "./dist/message-reducer.js",
+      "types": "./dist/message-reducer.d.ts"
+    },
+    "./run-with-claude": {
+      "import": "./dist/run-with-claude.js",
+      "require": "./dist/run-with-claude.js",
+      "types": "./dist/run-with-claude.d.ts"
+    }
   },
   "scripts": {
     "build": "tsc",
@@ -11,7 +49,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "ccpretty": "node dist/index.js"
+    "ccpretty": "node dist/index.js",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test && npm run build"
   },
   "keywords": [
     "log",

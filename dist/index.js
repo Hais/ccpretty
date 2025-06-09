@@ -33,7 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.runWithClaude = void 0;
 const readline = __importStar(require("readline"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -44,6 +48,14 @@ const message_queue_1 = require("./message-queue");
 const message_reducer_1 = require("./message-reducer");
 const terminal_output_1 = require("./terminal-output");
 const slack_output_1 = require("./slack-output");
+// Export public API
+var run_with_claude_1 = require("./run-with-claude");
+Object.defineProperty(exports, "runWithClaude", { enumerable: true, get: function () { return run_with_claude_1.runWithClaude; } });
+__exportStar(require("./models"), exports);
+__exportStar(require("./formatters"), exports);
+__exportStar(require("./slack"), exports);
+__exportStar(require("./message-queue"), exports);
+__exportStar(require("./message-reducer"), exports);
 // Load environment variables from .env files
 function loadEnvironmentVariables() {
     // Load .env file from current working directory

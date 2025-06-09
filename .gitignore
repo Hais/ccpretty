@@ -2,6 +2,7 @@ node_modules/*
 fixtures/*
 .vscode/*
 .DS_Store
+dist/*
 
 # Environment files
 .env
