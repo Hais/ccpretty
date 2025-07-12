@@ -3,8 +3,7 @@ import { createWriteStream, promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { InputParser } from './input-parser';
-import { MessageQueue, MessageGroup } from './message-queue';
-import { MessageReducer } from './message-reducer';
+// Removed MessageQueue and MessageReducer dependencies
 import { TerminalOutput } from './terminal-output';
 import { SlackOutput } from './slack-output';
 
@@ -210,8 +209,7 @@ async function processWithCcpretty(
   const inputParser = new InputParser();
   const terminalOutput = new TerminalOutput();
   let slackOutput: SlackOutput | null = null;
-  let messageQueue: MessageQueue | null = null;
-  let messageReducer: MessageReducer | null = null;
+  // Queue functionality removed
 
   // Initialize Slack output if configured
   if (options.slack) {
@@ -247,7 +245,7 @@ async function processWithCcpretty(
             };
             
             // Output to terminal
-            terminalOutput.output(reduced);
+            terminalOutput.output(message);
             
             // Restore console
             console.log = originalLog;
@@ -257,7 +255,7 @@ async function processWithCcpretty(
             
             // Output to Slack if configured
             if (slackOutput) {
-              await slackOutput.output(reduced);
+              await slackOutput.output(message);
             }
           } catch (error) {
             if (options.debug) {
@@ -309,7 +307,7 @@ async function processWithCcpretty(
             };
             
             // Output to terminal
-            terminalOutput.output(reduced);
+            terminalOutput.output(message);
             
             // Restore console
             console.log = originalLog;
@@ -319,7 +317,7 @@ async function processWithCcpretty(
             
             // Output to Slack if configured
             if (slackOutput) {
-              await slackOutput.output(reduced);
+              await slackOutput.output(message);
             }
           }
         }

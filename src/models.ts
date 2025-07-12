@@ -1,21 +1,39 @@
-// Common types
+import type { 
+  Message as AnthropicMessage,
+  TextBlock,
+  ToolUseBlock,
+  ContentBlock,
+  Usage as AnthropicUsage,
+  MessageParam,
+  ToolResultBlockParam
+} from '@anthropic-ai/sdk/resources/messages/messages.js';
+
+// Re-export Anthropic SDK types for convenience
+export type { 
+  AnthropicMessage,
+  TextBlock,
+  ToolUseBlock,
+  ContentBlock as AnthropicContentBlock,
+  AnthropicUsage
+};
+
+// Custom types for Claude Code logging format
+// These wrap the Anthropic SDK types with additional metadata
+
+// Extended Usage type that includes additional fields from Claude Code
 export interface Usage {
   input_tokens: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
   output_tokens: number;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  server_tool_use?: any;
+  service_tier?: 'standard' | 'priority' | 'batch' | null;
 }
 
-// Content types
-export interface TextContent {
-  type: 'text';
-  text: string;
-}
+// Content types - using Anthropic SDK types directly
+export type TextContent = TextBlock;
 
-export interface ToolUseContent {
-  type: 'tool_use';
-  id: string;
-  name: string;
+export interface ToolUseContent extends ToolUseBlock {
   input: {
     command?: string;
     description?: string;
@@ -33,20 +51,13 @@ export interface ToolResultContent {
 
 export type MessageContent = TextContent | ToolUseContent | ToolResultContent;
 
-// Message structure
-export interface AssistantMessage {
-  id: string;
-  type: 'message';
-  role: 'assistant';
-  model: string;
+// Message structure - extends Anthropic SDK Message
+export interface AssistantMessage extends Omit<AnthropicMessage, 'content'> {
   content: MessageContent[];
-  stop_reason: 'tool_use' | 'end_turn' | string;
-  stop_sequence: string | null;
-  usage: Usage;
   ttftMs: number;
 }
 
-// Response types
+// Response types - Claude Code specific wrapper format
 export interface AssistantTextResponse {
   type: 'assistant';
   message: AssistantMessage & {
@@ -77,7 +88,7 @@ export interface UserResponse {
   session_id: string;
 }
 
-// System message types
+// System message types - Claude Code specific
 export interface SystemInitMessage {
   type: 'system';
   subtype: 'init';
@@ -97,7 +108,7 @@ export interface SystemMessage {
 
 export type SystemResponse = SystemInitMessage | SystemMessage;
 
-// Result message types
+// Result message types - Claude Code specific
 export interface ResultResponse {
   type: 'result';
   subtype: 'success' | 'error';
@@ -113,8 +124,16 @@ export interface ResultResponse {
   duration_ms: number;
   duration_api_ms: number;
   num_turns: number;
-  cost_usd: number;
+  total_cost_usd: number; // Changed from cost_usd to match actual log format
   session_id: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    server_tool_use?: any;
+    service_tier?: string;
+  };
 }
 
 // Union of all message types

@@ -12,9 +12,10 @@ import {
   SystemResponse,
   ResultResponse
 } from './models';
-import { ReducedMessage } from './message-reducer';
+// Removed ReducedMessage dependency
 import { RateLimiter } from './rate-limiter';
 import { isSignificantEvent } from './slack';
+import { formatSessionDisplay } from './github-utils';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -30,12 +31,9 @@ export class SlackOutput {
   private config: SlackConfig;
   private threadTs?: string;
   private initialMessageTs?: string;
-  private toolMessages: Map<string, string> = new Map();
+  private toolMessages: Map<string, { ts: string; name: string; input: any }> = new Map();
   private lastSlackContent: string = '';
-  private consecutiveAssistantMessages: string[] = [];
   private sessionId?: string;
-  private pendingToolUses: any[] = [];
-  private lastMessageType?: string;
   private rateLimiter: RateLimiter;
   private debugMode: boolean;
   private debugLogPath?: string;
@@ -103,49 +101,23 @@ export class SlackOutput {
   }
 
   /**
-   * Output a reduced message to Slack
+   * Output a message to Slack
    */
-  async output(reduced: ReducedMessage): Promise<void> {
+  async output(message: Message): Promise<void> {
     try {
-      const { message, metadata } = reduced;
       const currentType = message.type;
     
     // Debug log all messages
     if (process.env.CCPRETTY_DEBUG) {
-      console.error(`[SlackOutput] Received ${currentType} message, metadata type: ${metadata.type}`);
+      console.error(`[SlackOutput] Received ${currentType} message`);
     }
     
     // Check if this is a significant event worth posting to Slack
-    // Note: We always process tool execution metadata regardless of significance
-    const isToolExecution = metadata.type === 'tool_complete' || 
-                           metadata.type === 'tool_failed' || 
-                           metadata.type === 'tool_interrupted';
-    
-    if (!isToolExecution && !isSignificantEvent(message as any)) {
+    if (!isSignificantEvent(message as any)) {
       if (process.env.CCPRETTY_DEBUG) {
         console.error(`[SlackOutput] Skipping non-significant ${currentType} message`);
       }
       return;
-    }
-    
-    // Flush any pending messages when switching to a different postable message type
-    // (user messages don't count as they're not posted to Slack)
-    const isPostableType = currentType !== 'user';
-    const wasPostableType = this.lastMessageType && this.lastMessageType !== 'user';
-    
-    if (wasPostableType && isPostableType && this.lastMessageType !== currentType) {
-      try {
-        await this.flushPendingMessages();
-        
-        // Add divider between different message types 
-        await this.postDivider();
-      } catch (error) {
-        console.error('Error flushing pending messages or posting divider:', error);
-        if (process.env.CCPRETTY_DEBUG) {
-          console.error('Context: switching from', this.lastMessageType, 'to', currentType);
-        }
-        // Continue processing despite flush/divider errors
-      }
     }
     
     // Handle different message types
@@ -153,7 +125,7 @@ export class SlackOutput {
       if (isSystemResponse(message)) {
         await this.handleSystemMessage(message as SystemResponse);
       } else if (isAssistantResponse(message)) {
-        await this.handleAssistantMessage(message as AssistantResponse, metadata);
+        await this.handleAssistantMessage(message as AssistantResponse);
       } else if (message.type === 'result') {
         await this.handleResultMessage(message as ResultResponse);
       } else if (isUserResponse(message)) {
@@ -164,19 +136,13 @@ export class SlackOutput {
       console.error('Error handling specific message type:', error);
       if (process.env.CCPRETTY_DEBUG) {
         console.error('Message type:', currentType);
-        console.error('Metadata:', JSON.stringify(metadata, null, 2));
       }
       // Continue processing despite message handling errors
-    }
-    
-    // Update last message type (only for postable types)
-    if (isPostableType) {
-      this.lastMessageType = currentType;
     }
     } catch (error) {
       console.error('Error processing Slack output:', error);
       if (process.env.CCPRETTY_DEBUG) {
-        console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+        console.error('Problematic message:', JSON.stringify(message, null, 2));
       }
     }
   }
@@ -190,8 +156,15 @@ export class SlackOutput {
     this.sessionId = response.session_id;
     const tools = 'tools' in response ? response.tools : [];
     
-    // Create or update the initial message
-    const text = `*Session Started* (${this.sessionId})\n_Available tools: ${tools.join(', ')}_`;
+    // Create the initial session message without tools
+    const sessionDisplay = formatSessionDisplay(this.sessionId);
+    let text: string;
+    
+    if (sessionDisplay.isLink) {
+      text = `*Session Started*\n<${sessionDisplay.text}|GitHub Actions Run>`;
+    } else {
+      text = `*Session Started* (${sessionDisplay.text})`;
+    }
     
     try {
       const payload = {
@@ -230,24 +203,78 @@ export class SlackOutput {
         
         this.logSlackCall('reactions.add', reactionPayload, reactionResult);
       }
+
+      // Post available tools as a separate message in the thread
+      if (tools.length > 0) {
+        await this.postAvailableTools(tools);
+      }
     } catch (error) {
       console.error('Failed to post to Slack:', error);
+    }
+  }
+
+  /**
+   * Post available tools as a separate message
+   */
+  private async postAvailableTools(tools: string[]): Promise<void> {
+    try {
+      const blocks = [
+        {
+          type: "divider"
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "🔧 *Available Tools*"
+          }
+        }
+      ];
+
+      // Show up to 9 tools, then add remaining count if needed
+      const contextElements = tools.slice(0, 9).map(tool => ({
+        type: "mrkdwn",
+        text: `\`${tool}\``
+      }));
+
+      // Add remaining count if there are more than 9 tools
+      if (tools.length > 9) {
+        const remainingCount = tools.length - 9;
+        contextElements.push({
+          type: "mrkdwn",
+          text: `_+${remainingCount} more_`
+        });
+      }
+
+      blocks.push({
+        type: "context",
+        elements: contextElements
+      } as any);
+
+      const payload = {
+        channel: this.config.channel,
+        thread_ts: this.threadTs,
+        blocks,
+        text: `Available tools: ${tools.join(', ')}`
+      };
+      
+      this.logSlackCall('chat.postMessage', payload);
+      
+      const result = await this.rateLimiter.execute(() =>
+        this.client.chat.postMessage(payload)
+      );
+      
+      this.logSlackCall('chat.postMessage', payload, result);
+    } catch (error) {
+      console.error('Failed to post available tools to Slack:', error);
     }
   }
   
   /**
    * Handle assistant messages
    */
-  private async handleAssistantMessage(response: AssistantResponse, metadata: any): Promise<void> {
+  private async handleAssistantMessage(response: AssistantResponse): Promise<void> {
     const contents = response.message?.content || [];
-    
-    // Check if this is a tool execution
-    if (metadata.type === 'tool_complete' || metadata.type === 'tool_failed' || metadata.type === 'tool_interrupted') {
-      // Flush any pending assistant messages before handling tool execution
-      await this.flushAssistantMessages();
-      await this.handleToolExecution(response, metadata);
-      return;
-    }
     
     // Handle text content and tool uses
     let hasText = false;
@@ -267,87 +294,6 @@ export class SlackOutput {
     // or when waitForCompletion() is called
   }
   
-  /**
-   * Handle tool execution messages
-   */
-  private async handleToolExecution(response: AssistantResponse, metadata: any): Promise<void> {
-    const { toolName, toolStatus, duration, toolResult } = metadata;
-    
-    // Find the tool use content
-    const contents = response.message?.content || [];
-    const toolUse = contents.find((c: any) => c.type === 'tool_use');
-    
-    if (!toolUse) {
-      if (process.env.CCPRETTY_DEBUG) {
-        console.error('[SlackOutput] No tool_use content found in tool execution message');
-      }
-      return;
-    }
-    
-    const toolId = (toolUse as any).id;
-    if (!toolId) {
-      if (process.env.CCPRETTY_DEBUG) {
-        console.error('[SlackOutput] No tool ID found in tool_use content');
-      }
-      return;
-    }
-    
-    const existingMessageTs = this.toolMessages.get(toolId);
-    
-    // Validate that we can create blocks before proceeding
-    let blocks;
-    try {
-      blocks = this.createToolBlocks(toolName, toolStatus, duration, (toolUse as any).input, toolResult);
-    } catch (error) {
-      console.error('Error creating tool blocks:', error);
-      if (process.env.CCPRETTY_DEBUG) {
-        console.error('Tool execution context:', { toolName, toolStatus, toolId });
-      }
-      return;
-    }
-    
-    try {
-      if (existingMessageTs && existingMessageTs !== 'pending') {
-        // Update existing message
-        const updatePayload = {
-          channel: this.config.channel,
-          ts: existingMessageTs,
-          blocks,
-          text: `${toolName} ${toolStatus}`
-        };
-        
-        this.logSlackCall('chat.update', updatePayload);
-        
-        const updateResult = await this.rateLimiter.execute(() =>
-          this.client.chat.update(updatePayload)
-        );
-        
-        this.logSlackCall('chat.update', updatePayload, updateResult);
-      } else {
-        // Post new message
-        const postPayload = {
-          channel: this.config.channel,
-          thread_ts: this.threadTs,
-          blocks,
-          text: `${toolName} ${toolStatus}`
-        };
-        
-        this.logSlackCall('chat.postMessage', postPayload);
-        
-        const result = await this.rateLimiter.execute(() =>
-          this.client.chat.postMessage(postPayload)
-        );
-        
-        this.logSlackCall('chat.postMessage', postPayload, result);
-        
-        if (result.ts) {
-          this.toolMessages.set(toolId, result.ts);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to post tool update to Slack:', error);
-    }
-  }
   
   /**
    * Create Slack blocks for tool execution
@@ -357,105 +303,87 @@ export class SlackOutput {
     if (toolName === 'TodoWrite' && input?.todos) {
       const statusEmoji = status === 'completed' ? '✅' : 
                          status === 'failed' ? '❌' : 
-                         status === 'interrupted' ? '⚠️' : '⏳';
+                         status === 'interrupted' ? '⚠️' : '🔧';
       const durationStr = duration ? ` (${(duration / 1000).toFixed(2)}s)` : '';
       
       const blocks: any[] = [
         {
+          "type": "divider"
+        },
+        {
           type: "header",
           text: {
             type: "plain_text",
-            text: `📝 Todo List ${status}${durationStr}`,
+            text: `📝 Todo List`,
             emoji: true
           }
         }
       ];
       
-      // Group todos by status
-      const pendingTodos = input.todos.filter((t: any) => t.status === 'pending');
-      const inProgressTodos = input.todos.filter((t: any) => t.status === 'in_progress');
-      const completedTodos = input.todos.filter((t: any) => t.status === 'completed');
-      
-      // Add pending todos
-      if (pendingTodos.length > 0) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "*⏳ Pending:*"
-          }
-        });
+      // Create single todo list with rich formatting
+      const todoElements = input.todos.map((todo: any) => {
+        const statusText = todo.status === 'pending' ? '[ ]' :
+               todo.status === 'in_progress' ? '[•]' :
+               todo.status === 'completed' ? '[X]' : '[?]';
         
-        const pendingText = pendingTodos.map((todo: any) => {
-          const priorityEmoji = todo.priority === 'high' ? '🔴' : 
-                              todo.priority === 'medium' ? '🟡' : '🟢';
-          return `${priorityEmoji} ${todo.content}`;
-        }).join('\n');
-        
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: pendingText
+        const listItem = [
+          {
+            type: "text",
+            text: "- "
+          },
+          {
+            type: "text",
+            text: statusText,
+            style: {
+              code: true
+            }
+          },
+          {
+            type: "text",
+            text: " "
           }
-        });
-      }
-      
-      // Add in-progress todos
-      if (inProgressTodos.length > 0) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "*🔄 In Progress:*"
+        ];
+
+        if (todo.status === 'completed') {
+          listItem.push({
+            type: "text",
+            text: todo.content,
+            style: {
+              strike: true
+            }
+          } as any);
+        } else {
+          listItem.push({
+            type: "text",
+            text: todo.content
+          });
+        }
+
+        return {
+          type: "rich_text_section",
+          elements: listItem
+        };
+      });
+
+      blocks.push({
+        type: "rich_text",
+        elements: [
+          {
+            type: "rich_text_list",
+            style: "ordered",
+            elements: todoElements
           }
-        });
-        
-        const inProgressText = inProgressTodos.map((todo: any) => {
-          const priorityEmoji = todo.priority === 'high' ? '🔴' : 
-                              todo.priority === 'medium' ? '🟡' : '🟢';
-          return `${priorityEmoji} ${todo.content}`;
-        }).join('\n');
-        
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: inProgressText
-          }
-        });
-      }
-      
-      // Add completed todos
-      if (completedTodos.length > 0) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "*✅ Completed:*"
-          }
-        });
-        
-        const completedText = completedTodos.map((todo: any) => {
-          return `~${todo.content}~`;
-        }).join('\n');
-        
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: completedText
-          }
-        });
-      }
+        ]
+      });
       
       // Add summary context
+      const completedCount = input.todos.filter((t: any) => t.status === 'completed').length;
       blocks.push({
         type: "context",
         elements: [
           {
             type: "mrkdwn",
-            text: `📊 *Summary:* ${completedTodos.length}/${input.todos.length} completed`
+            text: `📊 *Summary:* ${completedCount}/${input.todos.length} completed`
           }
         ]
       });
@@ -472,28 +400,53 @@ export class SlackOutput {
     
     const blocks: any[] = [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `${statusEmoji} *${toolName}* ${status}${durationStr}`
-        }
+        type: "divider"
+      },
+      {
+        type: "rich_text",
+        elements: [
+          {
+            type: "rich_text_section",
+            elements: [
+              {
+                type: "text",
+                text: `${statusEmoji} `
+              },
+              {
+                type: "text",
+                text: toolName,
+                style: {
+                  bold: true
+                }
+              },
+              {
+                type: "text",
+                text: ` ${status}${durationStr}`
+              }
+            ]
+          }
+        ]
       }
     ];
     
-    // Add context with parameters
+    // Add description as a section block if present
+    if (input?.description) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `${input.description}`
+        }
+      });
+    }
+
+    // Add context with parameters (command and file_path)
     const contextElements: any[] = [];
-    
+
     if (input?.command) {
       contextElements.push({
         type: 'mrkdwn',
-        text: `*Command:* \`${input.command}\``
-      });
-    }
-    
-    if (input?.description) {
-      contextElements.push({
-        type: 'mrkdwn',
-        text: `*Description:* ${input.description}`
+        text: `\`\`\`\n${input.command}\n\`\`\``
       });
     }
     
@@ -511,29 +464,29 @@ export class SlackOutput {
       });
     }
     
-    // Add result for completed tools
-    if (status === 'completed' && result) {
-      const resultText = typeof result === 'string' ? result : JSON.stringify(result);
-      if (resultText.length > 200) {
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*Result:* ${resultText.substring(0, 197)}...`
-          }
-        });
-      }
-    }
-    
     // Add error for failed tools
     if (status === 'failed' && result) {
       const errorText = typeof result === 'string' ? result : JSON.stringify(result);
       blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Error:* ${errorText.substring(0, 300)}`
-        }
+        type: "rich_text",
+        elements: [
+          {
+            type: "rich_text_preformatted",
+            elements: [
+              {
+                type: "text",
+                text: "Error: ",
+                style: {
+                  bold: true
+                }
+              },
+              {
+                type: "text",
+                text: errorText.substring(0, 300)
+              }
+            ]
+          }
+        ]
       });
     }
     
@@ -546,65 +499,74 @@ export class SlackOutput {
   private async postAssistantText(text: string): Promise<void> {
     if (!text.trim()) return;
     
-    // Accumulate consecutive assistant messages
-    this.consecutiveAssistantMessages.push(text);
-    
-    // Debug log
-    if (process.env.CCPRETTY_DEBUG) {
-      console.error(`[SlackOutput] Accumulated assistant message (${this.consecutiveAssistantMessages.length} total)`);
-    }
-    
-    // We'll post them together when we get a non-assistant message
-  }
-  
-  /**
-   * Post accumulated assistant messages
-   */
-  private async flushAssistantMessages(): Promise<void> {
-    // First flush any pending tool uses
-    await this.flushToolUses();
-    
-    if (this.consecutiveAssistantMessages.length === 0) return;
-    
-    // Debug log
-    if (process.env.CCPRETTY_DEBUG) {
-      console.error(`[SlackOutput] Flushing ${this.consecutiveAssistantMessages.length} assistant messages`);
-    }
-    
-    let combinedText: string;
-    
-    if (this.consecutiveAssistantMessages.length === 1) {
-      combinedText = this.consecutiveAssistantMessages[0];
-    } else {
-      // Number the messages
-      combinedText = this.consecutiveAssistantMessages
-        .map((msg, idx) => `${idx + 1}. ${msg}`)
-        .join('\n\n');
-    }
-    
-    // Clear the accumulator
-    this.consecutiveAssistantMessages = [];
-    
     // Check for deduplication
-    if (combinedText === this.lastSlackContent) {
+    if (text === this.lastSlackContent) {
       if (process.env.CCPRETTY_DEBUG) {
         console.error('[SlackOutput] Skipping duplicate assistant message');
       }
       return;
     }
     
-    this.lastSlackContent = combinedText;
+    this.lastSlackContent = text;
     
-    // Truncate if too long
-    if (combinedText.length > 2800) {
-      combinedText = combinedText.substring(0, 2800) + '...';
-    }
+    // Split text into paragraphs and create sections
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
     
     try {
+      const blocks = [
+        {
+          type: "divider"
+        },
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: `💬 Assistant`,
+            emoji: true
+          }
+        }
+      ];
+
+      // Add each paragraph as a separate section
+      for (const paragraph of paragraphs) {
+        const trimmedParagraph = paragraph.trim();
+        if (trimmedParagraph) {
+          // Truncate individual paragraphs if too long for a single section
+          let sectionText = trimmedParagraph;
+          if (trimmedParagraph.length > 2900) {
+            sectionText = trimmedParagraph.substring(0, 2900) + '...';
+          }
+          
+          blocks.push({
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: sectionText
+            }
+          } as any);
+        }
+      }
+
+      // If no paragraphs were created (single line text), add as one section
+      if (blocks.length === 2) {
+        let sectionText = text.trim();
+        if (sectionText.length > 2900) {
+          sectionText = sectionText.substring(0, 2900) + '...';
+        }
+        blocks.push({
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: sectionText
+          }
+        } as any);
+      }
+
       const payload = {
         channel: this.config.channel,
         thread_ts: this.threadTs,
-        text: combinedText
+        blocks,
+        text: `💬 ${text.length > 100 ? text.substring(0, 100) + '...' : text}`
       };
       
       this.logSlackCall('chat.postMessage', payload);
@@ -623,50 +585,19 @@ export class SlackOutput {
     }
   }
   
+  
   /**
    * Post tool use
    */
   private async postToolUse(content: any): Promise<void> {
-    // Accumulate tool uses
-    this.pendingToolUses.push(content);
-  }
-  
-  /**
-   * Flush pending tool uses as a single message
-   */
-  private async flushToolUses(): Promise<void> {
-    if (this.pendingToolUses.length === 0) return;
-    
-    const blocks: any[] = [];
-    
-    // Add a header if multiple tools
-    if (this.pendingToolUses.length > 1) {
-      blocks.push({
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `Running ${this.pendingToolUses.length} tools`
-        }
-      });
-    }
-    
-    // Group tools into sections
-    for (const tool of this.pendingToolUses) {
-      const toolBlocks = this.createToolBlocks(tool.name, 'running', undefined, tool.input, null);
-      blocks.push(...toolBlocks);
-      
-      // Store the tool ID for later updates
-      this.toolMessages.set(tool.id, 'pending');
-    }
+    const blocks = this.createToolBlocks(content.name, '', undefined, content.input, null);
     
     try {
       const payload = {
         channel: this.config.channel,
         thread_ts: this.threadTs,
         blocks,
-        text: this.pendingToolUses.length > 1 ? 
-          `Running ${this.pendingToolUses.length} tools` : 
-          `Running ${this.pendingToolUses[0]?.name || 'tool'}`
+        text: `Running ${content.name}`
       };
       
       this.logSlackCall('chat.postMessage', payload);
@@ -677,52 +608,25 @@ export class SlackOutput {
       
       this.logSlackCall('chat.postMessage', payload, result);
       
-      // Update all tool IDs with the message timestamp
+      // Store tool info with the message timestamp
       if (result.ts) {
-        for (const tool of this.pendingToolUses) {
-          this.toolMessages.set(tool.id, result.ts);
-        }
+        this.toolMessages.set(content.id, {
+          ts: result.ts,
+          name: content.name,
+          input: content.input
+        });
       }
     } catch (error) {
-      console.error('Failed to post tool uses to Slack:', error);
+      console.error('Failed to post tool use to Slack:', error);
     }
-    
-    // Clear pending tools
-    this.pendingToolUses = [];
   }
   
-  /**
-   * Post a divider between different message types
-   */
-  private async postDivider(): Promise<void> {
-    try {
-      const payload = {
-        channel: this.config.channel,
-        thread_ts: this.threadTs,
-        blocks: [{
-          type: 'divider'
-        }],
-        text: '---'
-      };
-      
-      this.logSlackCall('chat.postMessage', payload);
-      
-      const result = await this.rateLimiter.execute(() =>
-        this.client.chat.postMessage(payload)
-      );
-      
-      this.logSlackCall('chat.postMessage', payload, result);
-    } catch (error) {
-      // Ignore divider errors
-    }
-  }
+  
   
   /**
    * Handle result messages
    */
   private async handleResultMessage(response: ResultResponse): Promise<void> {
-    // Flush any remaining assistant messages and tools
-    await this.flushAssistantMessages();
     
     const isSuccess = response.subtype === 'success' && !response.is_error;
     
@@ -765,9 +669,12 @@ export class SlackOutput {
     
     // Create result blocks
     const status = isSuccess ? '✅ Success' : '❌ Failed';
-    const fallbackText = `Task ${status} - Duration: ${(response.duration_ms / 1000).toFixed(2)}s, Cost: $${response.cost_usd.toFixed(4)}`;
+    const fallbackText = `Task ${status} - Duration: ${(response.duration_ms / 1000).toFixed(2)}s, Cost: $${response.total_cost_usd.toFixed(4)}`;
     
     const blocks: any[] = [
+      {
+        "type": "divider"
+      },
       {
         type: "header",
         text: {
@@ -777,50 +684,34 @@ export class SlackOutput {
         }
       },
       {
-        type: "section",
-        fields: [
+        type: "context",
+        elements: [
           {
             type: "mrkdwn",
-            text: `*⏱️ Duration:*\n${(response.duration_ms / 1000).toFixed(2)}s`
+            text: `⏱️ *Duration:* ${(response.duration_ms / 1000).toFixed(2)}s`
           },
           {
             type: "mrkdwn", 
-            text: `*🔄 API Time:*\n${(response.duration_api_ms / 1000).toFixed(2)}s`
+            text: `🔄 *API Time:* ${(response.duration_api_ms / 1000).toFixed(2)}s`
           },
           {
             type: "mrkdwn",
-            text: `*💬 Turns:*\n${response.num_turns}`
+            text: `💬 *Turns:* ${response.num_turns}`
           },
           {
             type: "mrkdwn",
-            text: `*💰 Cost:*\n$${response.cost_usd.toFixed(4)}`
+            text: `💰 *Cost:* $${response.total_cost_usd.toFixed(4)}`
           }
         ]
       }
     ];
-
-    // Add result content if it exists
-    if (typeof response.result === 'string' && response.result.trim()) {
-      // Truncate long results for Slack
-      const resultText = response.result.length > 2000 
-        ? response.result.substring(0, 1997) + '...'
-        : response.result;
-      
-      blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: resultText
-        }
-      });
-    }
     
     try {
       const payload = {
         channel: this.config.channel,
         thread_ts: this.threadTs,
-        text: fallbackText,
-        blocks: blocks
+        blocks: blocks,
+        text: fallbackText
       };
       
       this.logSlackCall('chat.postMessage', payload);
@@ -864,11 +755,8 @@ export class SlackOutput {
    * Wait for all pending Slack messages to be sent
    */
   async waitForCompletion(): Promise<void> {
-    // First flush any pending messages
-    await this.flushPendingMessages();
-    
     // If we have an initial message but haven't posted a result, finalize with neutral status
-    if (this.initialMessageTs && this.lastMessageType !== 'result') {
+    if (this.initialMessageTs) {
       await this.finalizeSessionWithoutResult();
     }
     
@@ -919,13 +807,6 @@ export class SlackOutput {
     }
   }
   
-  /**
-   * Flush all pending messages (assistant messages and tool uses)
-   */
-  private async flushPendingMessages(): Promise<void> {
-    await this.flushAssistantMessages();
-    await this.flushToolUses();
-  }
 
   /**
    * Get the number of pending Slack messages
@@ -947,8 +828,49 @@ export class SlackOutput {
       return; // Skip user messages without tool results
     }
     
-    // For now, we don't post standalone tool results as they're handled
-    // by the tool execution flow. But this ensures we don't drop them.
-    // In the future, we might want to post orphaned tool results.
+    // Update the tool messages with their results
+    for (const result of toolResults) {
+      await this.updateToolMessage(result);
+    }
+  }
+  
+  /**
+   * Update a tool message with its result
+   */
+  private async updateToolMessage(result: any): Promise<void> {
+    const toolInfo = this.toolMessages.get(result.tool_use_id);
+    if (!toolInfo) {
+      // Tool message not found or not yet posted
+      return;
+    }
+    
+    // Determine the status and duration
+    const status = result.is_error ? 'failed' : 'completed';
+    const duration = undefined; // We don't have duration info in the result
+    
+    // Create updated blocks with the original tool info and result
+    const blocks = this.createToolBlocks(toolInfo.name, status, duration, toolInfo.input, result);
+    
+    try {
+      const payload = {
+        channel: this.config.channel,
+        ts: toolInfo.ts,
+        blocks,
+        text: `${status === 'completed' ? '✅' : '❌'} ${toolInfo.name} ${status}`
+      };
+      
+      this.logSlackCall('chat.update', payload);
+      
+      await this.rateLimiter.execute(() =>
+        this.client.chat.update(payload)
+      );
+      
+      this.logSlackCall('chat.update', payload, { ok: true });
+      
+      // Remove the tool from tracking after update
+      this.toolMessages.delete(result.tool_use_id);
+    } catch (error) {
+      console.error('Failed to update tool message:', error);
+    }
   }
 }

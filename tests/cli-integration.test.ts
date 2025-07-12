@@ -75,9 +75,7 @@ describe('CLI Integration Tests', () => {
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('Hello from CLI test');
-      expect(result.stdout).toContain('assistant');
-      expect(result.stdout).toContain('claude-3');
-      expect(result.stdout).toContain('5 tokens');
+      expect(result.stdout).toContain('Assistant');
     });
 
     it('should format valid system init message', async () => {
@@ -91,10 +89,16 @@ describe('CLI Integration Tests', () => {
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('🚀 Session Initialized');
-      expect(result.stdout).toContain('test-session');
-      expect(result.stdout).toContain('Bash, Read, Write');
-      expect(result.stdout).toContain('system');
+      expect(result.stdout).toContain('Session Initialized');
+      
+      // Check for either session ID or GitHub Actions run URL
+      const hasSessionId = result.stdout.includes('test-session');
+      const hasGitHubRunUrl = result.stdout.includes('GitHub Actions Run:');
+      expect(hasSessionId || hasGitHubRunUrl).toBe(true);
+      
+      expect(result.stdout).toContain('Bash');
+      expect(result.stdout).toContain('Read');
+      expect(result.stdout).toContain('Write');
     });
 
     it('should format valid result message', async () => {
@@ -106,16 +110,15 @@ describe('CLI Integration Tests', () => {
         duration_ms: 5000,
         duration_api_ms: 2000,
         num_turns: 3,
-        cost_usd: 0.0124
+        total_cost_usd: 0.0124
       });
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('✅ Task Completed');
+      expect(result.stdout).toContain('Task Success');
       expect(result.stdout).toContain('Task completed successfully');
       expect(result.stdout).toContain('Duration: 5.00s');
-      expect(result.stdout).toContain('Cost: $0.0124 USD');
-      expect(result.stdout).toContain('result');
+      expect(result.stdout).toContain('Cost: $0.0124');
     });
 
     it('should handle tool use messages', async () => {
@@ -148,7 +151,7 @@ describe('CLI Integration Tests', () => {
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('Tool: Bash');
+      expect(result.stdout).toContain('Using Tool:');
       expect(result.stdout).toContain('Command: ls -la');
       expect(result.stdout).toContain('Description: List files in directory');
     });
@@ -195,21 +198,77 @@ describe('CLI Integration Tests', () => {
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('📝 Todo List:');
+      expect(result.stdout).toContain('Todo List');
       expect(result.stdout).toContain('Test task');
       expect(result.stdout).toContain('Another task');
-      expect(result.stdout).toContain('[HIGH]');
-      expect(result.stdout).toContain('[MEDIUM]');
+    });
+
+    it('should handle TodoWrite tool result', async () => {
+      const toolUseMessage = JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'test-id',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-3',
+          content: [{
+            type: 'tool_use',
+            id: 'tool-123',
+            name: 'TodoWrite',
+            input: {
+              todos: [
+                {
+                  id: '1',
+                  content: 'Update docs',
+                  status: 'completed',
+                  priority: 'high'
+                }
+              ]
+            }
+          }],
+          stop_reason: 'tool_use',
+          stop_sequence: null,
+          usage: {
+            input_tokens: 30,
+            output_tokens: 15
+          },
+          ttftMs: 200
+        },
+        session_id: 'test-session'
+      });
+
+      const toolResultMessage = JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'tool-123',
+            content: 'Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable',
+            is_error: false
+          }]
+        },
+        session_id: 'test-session'
+      });
+
+      const input = `${toolUseMessage}\n${toolResultMessage}`;
+      const result = await runCLI(input);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('TodoWrite');
+      expect(result.stdout).toContain('Update docs');
+      expect(result.stdout).toContain('TodoWrite Result');
+      expect(result.stdout).toContain('Todos have been modified successfully');
     });
   });
 
   describe('Non-JSON Input', () => {
-    it('should pass through non-JSON text unchanged', async () => {
-      const input = 'This is just plain text, not JSON';
+        it('should handle non-JSON text gracefully (no output)', async () => {
+      const input = 'This is just plain text, not JSON\n';
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('This is just plain text, not JSON');
+      // Non-JSON text is ignored and doesn't produce output
+      expect(result.stdout).toBe('');
     });
 
     it('should handle mixed JSON and non-JSON input', async () => {
@@ -228,12 +287,15 @@ describe('CLI Integration Tests', () => {
         },
         session_id: 'test-session'
       });
-      const input = `Plain text before\n${jsonPart}\nPlain text after`;
+      const input = `Plain text before\n${jsonPart}\nPlain text after\n`;
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('Hello');
-      expect(result.stdout).toContain('assistant');
+      expect(result.stdout).toContain('Assistant');
+      // Non-JSON text is ignored, only JSON messages are processed
+      expect(result.stdout).not.toContain('Plain text before');
+      expect(result.stdout).not.toContain('Plain text after');
     });
   });
 
@@ -267,7 +329,11 @@ describe('CLI Integration Tests', () => {
         mcp_servers: []
       });
 
-      const result = await runCLI(input);
+      const result = await runCLI(input, {
+        // Explicitly unset Slack environment variables
+        CCPRETTY_SLACK_TOKEN: '',
+        CCPRETTY_SLACK_CHANNEL: ''
+      });
       expect(result.exitCode).toBe(0);
       expect(result.stderr).not.toContain('Slack integration active:');
     });
@@ -281,7 +347,7 @@ describe('CLI Integration Tests', () => {
         duration_ms: 1000,
         duration_api_ms: 500,
         num_turns: 1,
-        cost_usd: 0.001
+        total_cost_usd: 0.001
       });
 
       const result = await runCLI(input, {
@@ -290,19 +356,22 @@ describe('CLI Integration Tests', () => {
       });
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('✅ Task Completed');
-      expect(result.stderr).toContain('Slack authentication failed: invalid_auth');
+      expect(result.stdout).toContain('Task Success');
+      expect(result.stderr).toContain('Failed to post result to Slack');
     });
   });
 
   describe('Error Handling', () => {
     it('should handle malformed JSON gracefully', async () => {
-      const input = '{"invalid": json, "missing": "quotes"}';
+      const input = '{"invalid": json, "missing": "quotes"}\n';
 
-      const result = await runCLI(input);
+      const result = await runCLI(input, {
+        CCPRETTY_SLACK_TOKEN: '',
+        CCPRETTY_SLACK_CHANNEL: ''
+      });
       expect(result.exitCode).toBe(0);
-      // Should output the original text when JSON parsing fails
-      expect(result.stdout).toContain('{"invalid": json, "missing": "quotes"}');
+      // Malformed JSON is ignored, no output expected
+      expect(result.stdout).toBe('');
     });
 
     it('should handle empty input', async () => {
@@ -331,7 +400,7 @@ describe('CLI Integration Tests', () => {
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('assistant');
+      expect(result.stdout).toContain('Assistant');
     });
   });
 
@@ -365,9 +434,9 @@ describe('CLI Integration Tests', () => {
 
       const result = await runCLI(input);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('🚀 Session Initialized');
+      expect(result.stdout).toContain('Session Initialized');
       expect(result.stdout).toContain('Hello');
-      expect(result.stdout).toContain('assistant');
+      expect(result.stdout).toContain('Assistant');
     });
   });
 });

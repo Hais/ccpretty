@@ -12,40 +12,45 @@ export class InputParser {
     parseLine(line: string): Message[] {
         const messages: Message[] = [];
         
-        // Add line to buffer with newline (preserve original formatting)
+        // Add line to buffer 
         this.buffer += line + '\n';
         
-        // Track brace counting to detect complete JSON objects
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '{') {
-                if (this.braceCount === 0) {
-                    // Mark the start of a new JSON object in the buffer
-                    this.currentJsonStart = this.buffer.length - line.length - 1 + i;
-                }
-                this.braceCount++;
-            } else if (char === '}') {
-                this.braceCount--;
-                if (this.braceCount === 0 && this.currentJsonStart !== -1) {
-                    // We have a complete JSON object
-                    const jsonString = this.buffer.substring(this.currentJsonStart);
-                    
-                    try {
-                        const extracted = extractJsonSync(jsonString);
-                        if (extracted.length > 0) {
-                            const parsed = extracted[0];
-                            if (this.isValidMessage(parsed)) {
-                                messages.push(parsed as Message);
-                            }
-                        }
-                    } catch (e) {
-                        // Ignore parsing errors
+        // Extract all complete JSON objects from the buffer
+        let startPos = 0;
+        while (startPos < this.buffer.length) {
+            try {
+                // Find the start of a JSON object
+                const jsonStart = this.buffer.indexOf('{', startPos);
+                if (jsonStart === -1) break;
+                
+                // Try to extract JSON starting from this position
+                const remainingBuffer = this.buffer.substring(jsonStart);
+                const extracted = extractJsonSync(remainingBuffer);
+                
+                if (extracted.length > 0) {
+                    const parsed = extracted[0];
+                    if (this.isValidMessage(parsed)) {
+                        messages.push(parsed as Message);
                     }
                     
-                    // Clear the processed part of the buffer
-                    this.buffer = this.buffer.substring(this.buffer.length - line.length - 1 + i + 1);
-                    this.currentJsonStart = -1;
+                    // Find where this JSON object ends and continue from there
+                    const jsonStr = JSON.stringify(parsed);
+                    const endPos = jsonStart + remainingBuffer.indexOf(jsonStr) + jsonStr.length;
+                    
+                    // Move past this JSON object
+                    startPos = endPos;
+                    
+                    // Remove the processed JSON from the buffer
+                    this.buffer = this.buffer.substring(0, jsonStart) + this.buffer.substring(endPos);
+                    startPos = jsonStart; // Reset to check for more JSON at the same position
+                } else {
+                    // No valid JSON found, move to next character
+                    startPos = jsonStart + 1;
                 }
+            } catch (e) {
+                // Move to next character if parsing fails
+                startPos = this.buffer.indexOf('{', startPos) + 1;
+                if (startPos === 0) break; // No more '{' found
             }
         }
         

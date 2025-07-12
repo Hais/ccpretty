@@ -1,150 +1,271 @@
-# Claude Code Pretty
+# ccpretty - Claude Code Pretty Formatter
 
-<p align="left">
-  <img src="assets/logo.png" alt="Claude Code Pretty Logo" width="250" height="250" style="max-width:250px;max-height:250px;">
-</p>
+A powerful CLI tool that transforms Claude Code JSON logs into beautiful, human-readable output with colored boxes and intelligent formatting. Features real-time Slack integration for collaborative workflow monitoring.
 
-A CLI tool that formats JSON log lines from Claude Code sessions into human-readable output with colored boxes and special formatting. Optionally integrates with Slack to post real-time updates to a channel.
+## ✨ Features
 
-📚 **[Full Documentation](./docs/)** | 🏗️ **[Architecture](./docs/architecture.md)** | 📋 **[Message Formats](./docs/message-formats.md)**
+- **🎨 Pretty Formatting**: Transforms JSON logs into colored, boxed terminal output
+- **📝 Message Type Support**: Handles assistant, user, system, and result messages with distinct styling
+- **✅ TodoWrite Integration**: Displays todo lists with emoji status indicators and progress tracking
+- **💬 Slack Integration**: Real-time updates to Slack threads with workflow status reactions
+- **🔄 Streaming Support**: Processes multi-line JSON objects in real-time as they arrive
+- **🛡️ Robust Error Handling**: Graceful handling of malformed messages and Claude Code crashes
+- **⚡ Crash Recovery**: Timeout detection and automatic session finalization
+- **🔗 GitHub Actions Integration**: Automatic detection and linking of GitHub Actions runs
+- **📦 Programmatic API**: Export functions for use in other Node.js applications
 
-## Features
+## 📦 Installation
 
-- **Pretty Formatting**: Transforms JSON logs into colored, boxed output
-- **Message Type Support**: Handles assistant, user, system, and result messages
-- **Special TodoWrite Formatting**: Displays todo lists with emoji status indicators
-- **Slack Integration**: Posts updates to Slack threads with workflow status reactions
-- **Streaming Support**: Processes multi-line JSON objects in real-time
-- **Queue Mode** (NEW): Enable with `--queue` flag for:
-  - Tool use/result pairing - shows complete tool executions
-  - Message deduplication - filters redundant messages
-  - Better UX - less fragmented output
-
-## Installation
-
+### From npm (Recommended)
 ```bash
-# Install globally from npm
 npm install -g @hais/ccpretty
+```
 
-# Or install from source
-git clone https://github.com/hais/ccpretty.git
+### From Source
+```bash
+git clone https://github.com/Hais/ccpretty.git
 cd ccpretty
 npm install
 npm run build
 npm install -g .
 ```
 
-## Usage
-
+### Verify Installation
 ```bash
-# Basic usage - pipe Claude Code logs through ccpretty
+ccpretty --help
+```
+
+## 🚀 Usage
+
+### Basic Usage
+```bash
+# Pipe Claude Code logs through ccpretty for pretty terminal output
 claude -p "Hello world" --output-format stream-json --verbose | ccpretty
 
-# With Slack integration
+# Process a saved log file
+ccpretty < claude-session.log
+
+# Enable debug mode
+CCPRETTY_DEBUG=1 claude -p "Hello world" --output-format stream-json --verbose | ccpretty
+```
+
+### Slack Integration
+```bash
+# Set up Slack environment variables
 export CCPRETTY_SLACK_TOKEN=xoxb-your-token
 export CCPRETTY_SLACK_CHANNEL=#channel-name
+
+# Run with Slack updates
 claude -p "Hello world" --output-format stream-json --verbose | ccpretty
 
-# Continue posting to existing Slack thread (manual)
+# Continue in existing thread (manual)
 export CCPRETTY_SLACK_THREAD_TS=1234567890.123456
 claude -p "Hello world" --output-format stream-json --verbose | ccpretty
 
-# Or resume the last thread automatically
-claude -p "Hello world" --output-format stream-json --verbose  | ccpretty --resume-slack-thread
-
-# NEW: Queue-based processing with tool pairing and deduplication
-claude -p "Hello world" --output-format stream-json --verbose | ccpretty --queue
+# Resume last thread automatically
+ccpretty --resume-slack-thread < claude-session.log
 ```
 
-## Slack Integration
+### Programmatic Usage
+```typescript
+import { runWithClaude } from '@hais/ccpretty/run-with-claude';
+import { formatAssistantMessage } from '@hais/ccpretty/formatters';
 
-When Slack environment variables are set, ccpretty will:
-- Create a new thread (or use existing one if `CCPRETTY_SLACK_THREAD_TS` is set or `--resume-slack-thread` is used)
-- Post session initialization with available tools
-- Update with assistant messages and tool usage
-- Show workflow status with reactions (🚀 → ✅ or 🚨)
-- Tool status updates show live progress (⏳ → ✅ or ❌)
-- Groups consecutive assistant messages into numbered lists
-- Deduplicates identical messages
-- Save thread timestamp to `~/.ccpretty_slack_ts` for automatic reuse with `--resume-slack-thread`
+// Run Claude Code with ccpretty integration
+await runWithClaude(['claude', '-p', 'Hello world']);
 
-Required Slack bot permissions:
-
-- `assistant:write`  
-  Allow ccpretty to act as an App Agent
-
-- `chat:write`  
-  Send messages as ccpretty
-
-- `chat:write.customize`  
-  Send messages as ccpretty with a customised username and avatar
-
-- `emoji:read`  
-  View custom emoji in a workspace
-
-- `reactions:read`  
-  View emoji reactions and their associated content in channels and conversations that ccpretty has been added to
-
-- `reactions:write`  
-  Add and edit emoji reactions
-
-- `channels:history`  
-  View messages and other content in public channels that ccpretty has been added to
-
-## Environment Variables
-
-### Slack Integration
-- `CCPRETTY_SLACK_TOKEN` - Slack bot token (xoxb-...)
-- `CCPRETTY_SLACK_CHANNEL` - Slack channel to post to (#channel-name)
-- `CCPRETTY_SLACK_THREAD_TS` - Existing thread timestamp to post to (optional)
-
-### Custom Session Display
-- `CCPRETTY_TITLE` - Custom title to display instead of "Claude Code Session Started"
-- `CCPRETTY_DESCRIPTION` - Custom description to display below the title
-- `CCPRETTY_URL` - Custom URL to display in the session initialization
-
-Example:
-```bash
-export CCPRETTY_TITLE="My Custom Workflow"
-export CCPRETTY_DESCRIPTION="Processing data pipeline for analytics"
-export CCPRETTY_URL="https://example.com/workflow/123"
-claude -p "Hello world" --output-format stream-json --verbose | ccpretty
+// Use formatters directly
+const formatted = formatAssistantMessage(message);
 ```
 
-## Development
+## 💬 Slack Integration
+
+### Features
+When Slack environment variables are configured, ccpretty automatically:
+
+- 🧵 **Thread Management**: Creates new threads or resumes existing ones
+- 📊 **Session Tracking**: Posts initialization with session ID and available tools
+- 💬 **Real-time Updates**: Streams assistant messages and tool usage
+- 🎯 **Status Reactions**: Visual workflow status (🚀 → ✅ or 🚨)
+- ⏳ **Live Progress**: Tool execution status (⏳ → ✅ or ❌)
+- 📝 **Smart Grouping**: Combines consecutive assistant messages
+- 🚫 **Deduplication**: Skips identical messages
+- 💾 **Auto-resume**: Saves thread timestamp for `--resume-slack-thread`
+
+### Required Bot Permissions
+
+Your Slack bot needs these permissions:
+
+| Permission | Purpose |
+|------------|---------|
+| `assistant:write` | Act as an App Agent |
+| `chat:write` | Send messages as ccpretty |
+| `chat:write.customize` | Custom username and avatar |
+| `emoji:read` | View custom workspace emoji |
+| `reactions:read` | View emoji reactions and content |
+| `reactions:write` | Add and edit emoji reactions |
+| `channels:history` | View messages in public channels |
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+#### Slack Integration
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `CCPRETTY_SLACK_TOKEN` | Slack bot token | `xoxb-your-token` |
+| `CCPRETTY_SLACK_CHANNEL` | Channel to post to | `#dev-logs` |
+| `CCPRETTY_SLACK_THREAD_TS` | Existing thread timestamp | `1234567890.123456` |
+
+#### Custom Session Display
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CCPRETTY_TITLE` | Custom session title | "Claude Code Session Started" |
+| `CCPRETTY_DESCRIPTION` | Session description | Auto-generated |
+| `CCPRETTY_URL` | Custom session URL | GitHub Actions URL (if detected) |
+
+#### Debug and Logging
+| Variable | Description | Values |
+|----------|-------------|--------|
+| `CCPRETTY_DEBUG` | Enable debug logging | `1` or `0` |
+| `CCPRETTY_SLACK_DEBUG` | Slack API debug log file | `/path/to/logfile` |
+
+### Configuration Files
+
+ccpretty supports multiple configuration methods (in order of precedence):
+
+1. **Environment variables** (highest priority)
+2. **Local `.env` file** in project directory
+3. **Global `~/.ccpretty.env` file** for system-wide settings
+
+### Example Configuration
 
 ```bash
-# Install dependencies
+# ~/.ccpretty.env
+CCPRETTY_SLACK_TOKEN=xoxb-your-token
+CCPRETTY_SLACK_CHANNEL=#dev-logs
+CCPRETTY_TITLE="Data Pipeline Workflow"
+CCPRETTY_DESCRIPTION="Processing analytics data"
+CCPRETTY_DEBUG=1
+```
+
+## 🛠️ Development
+
+### Setup
+```bash
+# Clone and install
+git clone https://github.com/Hais/ccpretty.git
+cd ccpretty
 npm install
+```
 
-# Run in development mode
+### Development Commands
+```bash
+# Development mode (TypeScript watch)
 npm run dev
 
-# Build
+# Build project
 npm run build
 
 # Test locally
 npm run ccpretty
 
-# Run tests
+# Run test suite
 npm test
 
-# Run specific test suites
-npm test -- tests/queue-behavior.test.ts      # Queue functionality tests
-npm test -- tests/fixture-scenarios.test.ts   # Realistic workflow scenarios from fixtures
-npm test -- tests/workflow-scenarios.test.ts  # Complex multi-step workflows  
-npm test -- tests/message-reducer.test.ts     # State transformation tests
-npm test -- tests/formatters.test.ts          # Message formatting tests
-npm test -- tests/slack.test.ts               # Slack integration tests
-npm test -- tests/cli-integration.test.ts     # CLI integration tests
-npm test -- tests/json-processing.test.ts     # JSON processing tests
-npm test -- tests/models.test.ts              # Type guards and models tests
-npm test -- tests/queue-integration.test.ts   # Queue integration tests
+# Watch mode testing
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
 ```
 
-## Message Types
+### Test Suites
+```bash
+# Individual test files
+npm test -- tests/formatters.test.ts          # Message formatting
+npm test -- tests/slack.test.ts               # Slack integration
+npm test -- tests/cli-integration.test.ts     # CLI functionality
+npm test -- tests/models.test.ts              # Type definitions
+```
 
-- **Assistant**: Blue boxes with tool usage detection
-- **User**: Green boxes with tool results  
-- **System**: Magenta boxes for session events
-- **Result**: Success/error boxes with metrics (duration, cost, etc.)
+## 📋 Message Types
+
+ccpretty handles different Claude Code message types with distinct styling:
+
+| Type | Appearance | Content |
+|------|------------|---------|
+| **Assistant** | 🔵 Blue boxes | Tool usage detection, formatted responses |
+| **User** | 🟢 Green boxes | Tool results, user input |
+| **System** | 🟣 Magenta boxes | Session events, initialization |
+| **Result** | ✅/❌ Success/Error | Metrics (duration, cost, turns) |
+
+### Special Formatting
+- **TodoWrite**: Emoji-decorated lists with status tracking
+- **Tool Usage**: Command descriptions and execution status
+- **Session Results**: Duration, API time, cost summaries
+
+## 🔧 CLI Options
+
+```bash
+ccpretty [options]
+
+Options:
+  --resume-slack-thread    Resume posting to the last used Slack thread
+  --help                   Show help information
+  --version                Show version number
+```
+
+## 📚 API Reference
+
+### Package Exports
+
+```typescript
+// Main CLI application
+import ccpretty from '@hais/ccpretty';
+
+// Message formatting functions
+import { formatAssistantMessage, formatUserMessage } from '@hais/ccpretty/formatters';
+
+// TypeScript type definitions
+import { AssistantMessage, UserMessage, SystemMessage } from '@hais/ccpretty/models';
+
+// Slack integration utilities
+import { createSlackClient, postToSlack } from '@hais/ccpretty/slack';
+
+// Helper function for running Claude Code with ccpretty
+import { runWithClaude } from '@hais/ccpretty/run-with-claude';
+```
+
+### Key Functions
+
+#### `runWithClaude(args: string[]): Promise<void>`
+Programmatically run Claude Code with ccpretty integration:
+```typescript
+await runWithClaude(['claude', '-p', 'Hello world']);
+```
+
+#### Message Formatters
+Format individual messages for terminal display:
+```typescript
+const formatted = formatAssistantMessage(assistantMsg);
+const userFormatted = formatUserMessage(userMsg);
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make your changes with tests
+4. Run the test suite: `npm test`
+5. Submit a pull request
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+## 🔗 Links
+
+- [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
+- [GitHub Repository](https://github.com/Hais/ccpretty)
+- [npm Package](https://www.npmjs.com/package/@hais/ccpretty)

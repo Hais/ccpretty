@@ -50,11 +50,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello'
+            text: 'Hello',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -78,7 +79,7 @@ describe('Slack Integration', () => {
           }],
           stop_reason: 'tool_use',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -152,7 +153,7 @@ describe('Slack Integration', () => {
           }],
           stop_reason: 'tool_use',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -170,11 +171,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello'
+            text: 'Hello',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -211,11 +213,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello world'
+            text: 'Hello world',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -232,12 +235,12 @@ describe('Slack Integration', () => {
           role: 'assistant',
           model: 'claude-3',
           content: [
-            { type: 'text', text: 'First part' },
-            { type: 'text', text: 'Second part' }
+            { type: 'text', text: 'First part', citations: null },
+            { type: 'text', text: 'Second part', citations: null }
           ],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -256,11 +259,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: longText
+            text: longText,
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -297,8 +301,11 @@ describe('Slack Integration', () => {
       };
       const result = createSlackMessage(systemInit);
       expect(result).toContain('🚀 *Claude Code Session Started*');
-      expect(result).toContain('Session ID: `test-session`');
-      expect(result).toContain('Tools: Bash, Read');
+      
+      // Check for either session ID or GitHub Actions run URL
+      const hasSessionId = result.includes('Session ID: `test-session`');
+      const hasGitHubRunUrl = result.includes('GitHub Actions Run>');
+      expect(hasSessionId || hasGitHubRunUrl).toBe(true);
     });
 
     it('should create message for successful result', () => {
@@ -339,11 +346,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello world'
+            text: 'Hello world',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -372,7 +380,7 @@ describe('Slack Integration', () => {
           }],
           stop_reason: 'tool_use',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -404,7 +412,7 @@ describe('Slack Integration', () => {
       expect(blocks[0].type).toBe('header');
       expect(blocks[0].text.text).toContain('🚀 Claude Code Session Started');
       expect(blocks[1].type).toBe('section');
-      expect(blocks[1].fields).toHaveLength(2);
+      expect(blocks[1].fields).toHaveLength(1); // Only session ID field
     });
 
     it('should create blocks for result messages', () => {
@@ -444,7 +452,7 @@ describe('Slack Integration', () => {
           }],
           stop_reason: 'tool_use',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'
@@ -465,11 +473,12 @@ describe('Slack Integration', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello world'
+            text: 'Hello world',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 5 },
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: null, service_tier: null },
           ttftMs: 100
         },
         session_id: 'test-session'

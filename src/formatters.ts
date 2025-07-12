@@ -9,6 +9,7 @@ import {
   isToolUseContent,
   isToolResultContent,
 } from './models';
+import { formatSessionDisplay } from './github-utils';
 
 // Trim file path to be relative to current working directory if possible
 export function trimFilePath(filePath: string): string {
@@ -153,11 +154,23 @@ export function formatSystemResponse(response: SystemResponse): string {
       if (customUrl) {
         lines.push(`${pc.dim('URL:')} ${customUrl}`);
       }
-      lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
+      
+      const sessionDisplay = formatSessionDisplay(response.session_id);
+      if (sessionDisplay.isLink) {
+        lines.push(`${pc.dim('GitHub Actions Run:')} ${pc.cyan(sessionDisplay.text)}`);
+      } else {
+        lines.push(`${pc.dim('Session ID:')} ${sessionDisplay.text}`);
+      }
     } else {
       // Use default format without tools
       lines.push(`${pc.bold('🚀 Session Initialized')}`);
-      lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
+      
+      const sessionDisplay = formatSessionDisplay(response.session_id);
+      if (sessionDisplay.isLink) {
+        lines.push(`${pc.dim('GitHub Actions Run:')} ${pc.cyan(sessionDisplay.text)}`);
+      } else {
+        lines.push(`${pc.dim('Session ID:')} ${sessionDisplay.text}`);
+      }
     }
     
     if (response.mcp_servers.length > 0) {
@@ -166,7 +179,13 @@ export function formatSystemResponse(response: SystemResponse): string {
   } else {
     // Generic system message
     lines.push(`${pc.bold('System Event:')} ${response.subtype}`);
-    lines.push(`${pc.dim('Session ID:')} ${response.session_id}`);
+    
+    const sessionDisplay = formatSessionDisplay(response.session_id);
+    if (sessionDisplay.isLink) {
+      lines.push(`${pc.dim('GitHub Actions Run:')} ${pc.cyan(sessionDisplay.text)}`);
+    } else {
+      lines.push(`${pc.dim('Session ID:')} ${sessionDisplay.text}`);
+    }
   }
   
   // Wrap in a box with "system" title

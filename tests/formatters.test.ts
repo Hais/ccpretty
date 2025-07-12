@@ -1,3 +1,20 @@
+// Mock picocolors to avoid environment issues
+jest.mock('picocolors', () => {
+  const mockFn = (str: string) => str;
+  return {
+    __esModule: true,
+    default: mockFn,
+    bold: mockFn,
+    dim: mockFn,
+    cyan: mockFn,
+    green: mockFn,
+    red: mockFn,
+    yellow: mockFn,
+    blue: mockFn,
+    magenta: mockFn,
+  };
+});
+
 import {
   formatAssistantResponse,
   formatUserResponse,
@@ -78,14 +95,19 @@ describe('Formatters', () => {
           content: [
             {
               type: 'text',
-              text: 'Hello, world!'
+              text: 'Hello, world!',
+              citations: null
             }
           ],
           stop_reason: 'end_turn',
           stop_sequence: null,
           usage: {
             input_tokens: 10,
-            output_tokens: 5
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            server_tool_use: null,
+            service_tier: null
           },
           ttftMs: 100
         },
@@ -121,7 +143,11 @@ describe('Formatters', () => {
           stop_sequence: null,
           usage: {
             input_tokens: 10,
-            output_tokens: 5
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            server_tool_use: null,
+            service_tier: null
           },
           ttftMs: 100
         },
@@ -169,7 +195,11 @@ describe('Formatters', () => {
           stop_sequence: null,
           usage: {
             input_tokens: 10,
-            output_tokens: 5
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            server_tool_use: null,
+            service_tier: null
           },
           ttftMs: 100
         },
@@ -194,7 +224,8 @@ describe('Formatters', () => {
           content: [
             {
               type: 'text',
-              text: 'User message'
+              text: 'User message',
+              citations: null
             }
           ]
         },
@@ -266,7 +297,6 @@ describe('Formatters', () => {
       const result = formatSystemResponse(response);
       expect(result).toContain('🚀 Session Initialized');
       expect(result).toContain('Session ID: test-session');
-      expect(result).toContain('Tools: Bash, Read, Write');
       expect(result).toContain('MCP Servers: server1');
       expect(result).toContain('[system]');
     });

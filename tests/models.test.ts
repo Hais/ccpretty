@@ -20,7 +20,8 @@ describe('Type Guards', () => {
     it('should return true for text content', () => {
       const textContent: TextContent = {
         type: 'text',
-        text: 'Hello world'
+        text: 'Hello world',
+        citations: null
       };
       expect(isTextContent(textContent)).toBe(true);
     });
@@ -50,7 +51,8 @@ describe('Type Guards', () => {
     it('should return false for non-tool-use content', () => {
       const textContent: TextContent = {
         type: 'text',
-        text: 'Hello world'
+        text: 'Hello world',
+        citations: null
       };
       expect(isToolUseContent(textContent)).toBe(false);
     });
@@ -69,7 +71,8 @@ describe('Type Guards', () => {
     it('should return false for non-tool-result content', () => {
       const textContent: TextContent = {
         type: 'text',
-        text: 'Hello world'
+        text: 'Hello world',
+        citations: null
       };
       expect(isToolResultContent(textContent)).toBe(false);
     });
@@ -86,13 +89,18 @@ describe('Type Guards', () => {
           model: 'claude-3',
           content: [{
             type: 'text',
-            text: 'Hello'
+            text: 'Hello',
+            citations: null
           }],
           stop_reason: 'end_turn',
           stop_sequence: null,
           usage: {
             input_tokens: 10,
-            output_tokens: 5
+            output_tokens: 5,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            server_tool_use: null,
+            service_tier: null
           },
           ttftMs: 100
         },
@@ -117,7 +125,8 @@ describe('Type Guards', () => {
           role: 'user',
           content: [{
             type: 'text',
-            text: 'Hello'
+            text: 'Hello',
+            citations: null
           }]
         },
         session_id: 'test-session'

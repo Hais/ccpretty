@@ -12,38 +12,30 @@ import {
   SystemResponse,
   ResultResponse
 } from './models';
-import { ReducedMessage } from './message-reducer';
+import { formatSessionDisplay } from './github-utils';
 
 export class TerminalOutput {
   /**
-   * Format and output a reduced message to the terminal
+   * Format and output a message to the terminal
    */
-  output(reduced: ReducedMessage): void {
+  output(message: Message): void {
     try {
-      const formatted = this.format(reduced);
+      const formatted = this.format(message);
       if (formatted) {
         console.log(formatted);
       }
     } catch (error) {
       console.error('Error formatting terminal output:', error);
       if (process.env.CCPRETTY_DEBUG) {
-        console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
+        console.error('Problematic message:', JSON.stringify(message, null, 2));
       }
     }
   }
   
   /**
-   * Format a reduced message for terminal display
+   * Format a message for terminal display
    */
-  private format(reduced: ReducedMessage): string | null {
-    const { message, metadata } = reduced;
-    
-    // Handle tool executions with special formatting
-    if (metadata.type === 'tool_complete' || metadata.type === 'tool_failed' || metadata.type === 'tool_interrupted') {
-      return this.formatToolExecution(message, metadata);
-    }
-    
-    // Handle regular messages
+  private format(message: Message): string | null {
     if (isAssistantResponse(message)) {
       return this.formatAssistantResponse(message as AssistantResponse);
     } else if (isUserResponse(message)) {
@@ -113,7 +105,13 @@ export class TerminalOutput {
     
     if (response.subtype === 'init' && 'tools' in response) {
       output += pico.bold('🚀 Session Initialized\n');
-      output += `Session ID: ${response.session_id}\n`;
+      
+      const sessionDisplay = formatSessionDisplay(response.session_id);
+      if (sessionDisplay.isLink) {
+        output += `GitHub Actions Run: ${pico.cyan(sessionDisplay.text)}\n`;
+      } else {
+        output += `Session ID: ${sessionDisplay.text}\n`;
+      }
       
       if (response.tools?.length > 0) {
         output += '\nAvailable Tools:\n';
@@ -125,7 +123,13 @@ export class TerminalOutput {
       output += response.message;
     } else {
       output += `System Event: ${response.subtype}\n`;
-      output += `Session ID: ${response.session_id}`;
+      
+      const sessionDisplay = formatSessionDisplay(response.session_id);
+      if (sessionDisplay.isLink) {
+        output += `GitHub Actions Run: ${pico.cyan(sessionDisplay.text)}`;
+      } else {
+        output += `Session ID: ${sessionDisplay.text}`;
+      }
     }
     
     const title = process.env.CCPRETTY_TITLE || 'Claude Code Session Started';
@@ -155,11 +159,19 @@ export class TerminalOutput {
       output += `${response.result}\n\n`;
     }
     
-    // Add session statistics
-    output += `⏱️  Duration: ${(response.duration_ms / 1000).toFixed(2)}s\n`;
-    output += `🔄 API Time: ${(response.duration_api_ms / 1000).toFixed(2)}s\n`;
-    output += `💬 Turns: ${response.num_turns}\n`;
-    output += `💰 Cost: $${response.cost_usd.toFixed(4)}\n`;
+    // Add session statistics with null checks
+    if (response.duration_ms != null) {
+      output += `⏱️  Duration: ${(response.duration_ms / 1000).toFixed(2)}s\n`;
+    }
+    if (response.duration_api_ms != null) {
+      output += `🔄 API Time: ${(response.duration_api_ms / 1000).toFixed(2)}s\n`;
+    }
+    if (response.num_turns != null) {
+      output += `💬 Turns: ${response.num_turns}\n`;
+    }
+    if (response.total_cost_usd != null) {
+      output += `💰 Cost: $${response.total_cost_usd.toFixed(4)}\n`;
+    }
     
     return boxen(output.trim(), {
       padding: 1,
@@ -201,6 +213,13 @@ export class TerminalOutput {
    * Format tool result content
    */
   private formatToolResult(content: any): string {
+    // Check if this is a TodoWrite result by examining the content
+    if (typeof content.content === 'string' && content.content.includes('Todos have been modified successfully')) {
+      let output = `\n✅ TodoWrite Result:\n`;
+      output += `${content.content}\n`;
+      return output;
+    }
+    
     let output = `\n📤 Tool Result (${content.tool_use_id}):\n`;
     
     if (content.is_error) {
@@ -221,73 +240,7 @@ export class TerminalOutput {
     return output;
   }
   
-  /**
-   * Format tool execution with metadata
-   */
-  private formatToolExecution(message: Message, metadata: any): string {
-    const { toolName, toolStatus, duration, toolResult } = metadata;
-    
-    const statusIcon = toolStatus === 'completed' ? '✅' : 
-                      toolStatus === 'failed' ? '❌' : '⚠️';
-    const statusText = toolStatus.toUpperCase();
-    const durationStr = duration ? ` (${(duration / 1000).toFixed(2)}s)` : '';
-    
-    let output = `${statusIcon} Tool: ${toolName} - ${statusText}${durationStr}\n`;
-    
-    // Add tool parameters if available
-    if (isAssistantResponse(message)) {
-      const assistantContent = (message as any).message?.content || [];
-      const toolUse = assistantContent.find((c: any) => c.type === 'tool_use');
-      
-      if (toolUse?.input) {
-        output += '\n📥 Parameters:\n';
-        if (toolUse.input.command) {
-          output += `  Command: ${toolUse.input.command}\n`;
-        }
-        if (toolUse.input.description) {
-          output += `  Description: ${toolUse.input.description}\n`;
-        }
-        if (toolUse.input.file_path) {
-          output += `  File: ${toolUse.input.file_path}\n`;
-        }
-        if (toolUse.input.pattern) {
-          output += `  Pattern: ${toolUse.input.pattern}\n`;
-        }
-      }
-    }
-    
-    // Add result summary
-    if (toolResult && toolStatus === 'completed') {
-      output += '\n📤 Result:\n';
-      const resultText = typeof toolResult === 'string' 
-        ? toolResult 
-        : JSON.stringify(toolResult, null, 2);
-      
-      if (resultText.length > 300) {
-        output += resultText.substring(0, 297) + '...';
-      } else {
-        output += resultText;
-      }
-    } else if (toolResult && toolStatus === 'failed') {
-      output += '\n❌ Error:\n';
-      const errorText = typeof toolResult === 'string' 
-        ? toolResult 
-        : JSON.stringify(toolResult, null, 2);
-      output += pico.red(errorText.substring(0, 500));
-    } else if (toolStatus === 'interrupted') {
-      output += '\n⚠️ Tool execution was interrupted by a new request';
-    }
-    
-    const borderColor = toolStatus === 'completed' ? 'green' : 
-                       toolStatus === 'failed' ? 'red' : 'yellow';
-    
-    return boxen(output.trim(), {
-      padding: 1,
-      borderColor,
-      title: '🔧 Tool Execution',
-      titleAlignment: 'left'
-    });
-  }
+  
   
   /**
    * Format todo list with status icons

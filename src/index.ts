@@ -6,8 +6,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { config as loadEnv } from 'dotenv';
 import { InputParser } from './input-parser';
-import { MessageQueue } from './message-queue';
-import { MessageReducer } from './message-reducer';
 import { TerminalOutput } from './terminal-output';
 import { SlackOutput } from './slack-output';
 import { 
@@ -16,13 +14,10 @@ import {
   isSystemResponse
 } from './models';
 
-// Export public API
-export { runWithClaude, RunWithClaudeOptions, RunWithClaudeResult } from './run-with-claude';
+// Export public API - runWithClaude temporarily disabled due to dependencies
 export * from './models';
 export * from './formatters';
 export * from './slack';
-export * from './message-queue';
-export * from './message-reducer';
 
 interface CliConfig {
   slack?: {
@@ -30,7 +25,6 @@ interface CliConfig {
     channel: string;
     threadTs?: string;
   };
-  useQueue: boolean;
   resumeSlackThread: boolean;
 }
 
@@ -52,7 +46,6 @@ function getConfig(): CliConfig {
   loadEnvironmentVariables();
   
   const resumeSlackThread = process.argv.includes('--resume-slack-thread');
-  const useQueue = process.argv.includes('--queue');
   
   const token = process.env.CCPRETTY_SLACK_TOKEN;
   const channel = process.env.CCPRETTY_SLACK_CHANNEL;
@@ -65,7 +58,6 @@ function getConfig(): CliConfig {
   
   return {
     slack: token && channel ? { token, channel, threadTs } : undefined,
-    useQueue,
     resumeSlackThread
   };
 }
@@ -87,14 +79,12 @@ function readSlackThreadFromFile(): string | undefined {
 
 async function main() {
   const config = getConfig();
-  const { slack, useQueue, resumeSlackThread } = config;
+  const { slack, resumeSlackThread } = config;
   
   // Initialize components
   const inputParser = new InputParser();
   const terminalOutput = new TerminalOutput();
   let slackOutput: SlackOutput | null = null;
-  let messageQueue: MessageQueue | null = null;
-  let messageReducer: MessageReducer | null = null;
   
   // Initialize Slack output if configured
   if (slack) {
@@ -113,77 +103,11 @@ async function main() {
     console.error(`  Channel: ${slack.channel}`);
     console.error(`  Thread: ${slack.threadTs ? slack.threadTs : 'New thread will be created'}`);
   }
-  
-  // Initialize queue-based processing if enabled
-  if (useQueue) {
-    console.error('Queue-based processing enabled');
-    
-    messageReducer = new MessageReducer();
-    messageQueue = new MessageQueue(async (groups) => {
-      try {
-        if (!messageReducer) return;
-        
-        if (process.env.CCPRETTY_DEBUG) {
-          console.error(`[MessageQueue] Processing ${groups.length} groups`);
-        }
-        
-        const reducedMessages = messageReducer.reduceGroups(groups);
-        
-        if (process.env.CCPRETTY_DEBUG) {
-          console.error(`[MessageQueue] Reduced to ${reducedMessages.length} messages`);
-        }
-        
-        for (let i = 0; i < reducedMessages.length; i++) {
-          const reduced = reducedMessages[i];
-          try {
-            if (process.env.CCPRETTY_DEBUG) {
-              console.error(`[MessageQueue] Processing message ${i + 1}/${reducedMessages.length}: ${reduced.message.type} (${reduced.metadata.type})`);
-            }
-            
-            // Output to terminal
-            terminalOutput.output(reduced);
-            
-            // Output to Slack if configured
-            if (slackOutput) {
-              if (process.env.CCPRETTY_DEBUG) {
-                console.error(`[MessageQueue] Sending to Slack: ${reduced.message.type} (${reduced.metadata.type})`);
-              }
-              await slackOutput.output(reduced);
-              if (process.env.CCPRETTY_DEBUG) {
-                console.error(`[MessageQueue] Slack processing complete for message ${i + 1}`);
-              }
-            }
-          } catch (error) {
-            // Log message output errors but continue
-            console.error(`Error outputting message ${i + 1}/${reducedMessages.length}:`, error);
-            if (process.env.CCPRETTY_DEBUG) {
-              console.error('Problematic reduced message:', JSON.stringify(reduced, null, 2));
-            }
-          }
-        }
-        
-        if (process.env.CCPRETTY_DEBUG) {
-          console.error(`[MessageQueue] Completed processing ${groups.length} groups`);
-        }
-      } catch (error) {
-        // Log queue processing errors but continue
-        console.error('Error processing message queue:', error);
-        if (process.env.CCPRETTY_DEBUG) {
-          console.error('Problematic groups:', JSON.stringify(groups, null, 2));
-        }
-      }
-    });
-    
-    messageQueue.start();
-  }
 
   // Handle process termination signals
   const handleTermination = async (signal: string) => {
     console.error(`\nReceived ${signal}, cleaning up...`);
     try {
-      if (messageQueue) {
-        messageQueue.stop();
-      }
       if (slackOutput) {
         await slackOutput.waitForCompletion();
       }
@@ -193,6 +117,7 @@ async function main() {
       process.exit(1);
     }
   };
+
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -231,27 +156,13 @@ async function main() {
       
       for (const message of messages) {
         try {
-          if (useQueue && messageQueue) {
-            // Queue-based processing
-            messageQueue.enqueue(message);
-          } else {
-            // Direct processing
-            const reduced = {
-              message,
-              metadata: {
-                type: 'single' as const,
-                originalCount: 1
-              }
-            };
-            
             // Output to terminal
-            terminalOutput.output(reduced);
+            terminalOutput.output(message);
             
             // Output to Slack if configured
             if (slackOutput) {
-              await slackOutput.output(reduced);
+              await slackOutput.output(message);
             }
-          }
         } catch (error) {
           // Log message processing errors but continue
           console.error('Error processing message:', error);
@@ -272,13 +183,6 @@ async function main() {
   // Handle stdin end/close
   rl.on('close', async () => {
     try {
-      // Stop queue processing if enabled
-      if (messageQueue) {
-        // Give the queue a moment to process any final messages
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        messageQueue.stop();
-      }
-      
       // Wait for all Slack messages to be sent before exiting
       if (slackOutput) {
         const pendingCount = slackOutput.getPendingCount();

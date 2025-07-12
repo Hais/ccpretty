@@ -9,6 +9,7 @@ import {
   isToolResultContent,
 } from './models';
 import { trimFilePath } from './formatters';
+import { formatSessionDisplay } from './github-utils';
 
 export interface SlackConfig {
   token: string;
@@ -137,10 +138,21 @@ export function createSlackMessage(data: LogEntry): string {
       if (customUrl) {
         message += `\nURL: ${customUrl}`;
       }
-      message += `\nSession ID: \`${data.session_id}\``;
+      
+      const sessionDisplay = formatSessionDisplay(data.session_id);
+      if (sessionDisplay.isLink) {
+        message += `\n<${sessionDisplay.text}|GitHub Actions Run>`;
+      } else {
+        message += `\nSession ID: \`${sessionDisplay.text}\``;
+      }
       return message;
     } else {
-      return `🚀 *Claude Code Session Started*\nSession ID: \`${data.session_id}\``;
+      const sessionDisplay = formatSessionDisplay(data.session_id);
+      if (sessionDisplay.isLink) {
+        return `🚀 *Claude Code Session Started*\n<${sessionDisplay.text}|GitHub Actions Run>`;
+      } else {
+        return `🚀 *Claude Code Session Started*\nSession ID: \`${sessionDisplay.text}\``;
+      }
     }
   }
   
@@ -169,7 +181,7 @@ export function createSlackMessage(data: LogEntry): string {
           const completedTodos = tool.input.todos.filter((t: any) => t.status === 'completed');
           
           if (pendingTodos.length > 0) {
-            msg += `\n*⏳ Pending:*\n`;
+            msg += `\n*🔧 Pending:*\n`;
             msg += pendingTodos.map((todo: any) => {
               const priorityEmoji = todo.priority === 'high' ? '🔴' : 
                                   todo.priority === 'medium' ? '🟡' : '🟢';
@@ -263,11 +275,19 @@ export function createSlackBlocks(data: LogEntry): any[] {
     // Section with fields
     const fields: any[] = [];
     
-    // Add session ID field
-    fields.push({
-      type: "mrkdwn",
-      text: `*Session ID:*\n\`${data.session_id}\``
-    });
+    // Add session ID field with GitHub Actions detection
+    const sessionDisplay = formatSessionDisplay(data.session_id);
+    if (sessionDisplay.isLink) {
+      fields.push({
+        type: "mrkdwn",
+        text: `*GitHub Actions Run:*\n<${sessionDisplay.text}|View Run>`
+      });
+    } else {
+      fields.push({
+        type: "mrkdwn",
+        text: `*Session ID:*\n\`${sessionDisplay.text}\``
+      });
+    }
     
     // Add custom fields if present
     if (customDescription) {
@@ -361,7 +381,7 @@ export function createSlackBlocks(data: LogEntry): any[] {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: "*⏳ Pending:*"
+                text: "*🔧 Pending:*"
               }
             });
             
