@@ -109,7 +109,12 @@ async function main() {
     console.error(`\nReceived ${signal}, cleaning up...`);
     try {
       if (slackOutput) {
-        await slackOutput.waitForCompletion();
+        // Mark as failure for timeout, neutral for other signals
+        if (signal === 'TIMEOUT') {
+          await slackOutput.waitForCompletionWithFailure();
+        } else {
+          await slackOutput.waitForCompletion();
+        }
       }
       process.exit(0);
     } catch (error) {
@@ -134,14 +139,14 @@ async function main() {
     if (activityTimer) {
       clearTimeout(activityTimer);
     }
-    // Set a 30-second timeout for stdin activity
+    // Set a 5-minute timeout for stdin activity
     activityTimer = setTimeout(() => {
       const inactiveTime = Date.now() - lastActivity;
-      if (inactiveTime > 30000) {
+      if (inactiveTime > 300000) {
         console.error(`No input received for ${Math.round(inactiveTime/1000)}s. Upstream process may have crashed.`);
         handleTermination('TIMEOUT');
       }
-    }, 30000);
+    }, 300000);
   };
   
   resetActivityTimer();

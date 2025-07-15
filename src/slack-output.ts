@@ -766,11 +766,27 @@ export class SlackOutput {
       new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
     ]);
   }
+
+  /**
+   * Wait for completion and mark as failure
+   */
+  async waitForCompletionWithFailure(): Promise<void> {
+    // If we have an initial message but haven't posted a result, finalize with failure status
+    if (this.initialMessageTs) {
+      await this.finalizeSessionWithoutResult(true);
+    }
+    
+    // Then wait for rate limiter to finish with a timeout
+    await Promise.race([
+      this.rateLimiter.waitForCompletion(),
+      new Promise(resolve => setTimeout(resolve, 10000)) // 10 second timeout
+    ]);
+  }
   
   /**
    * Finalize Slack session when no result message is received
    */
-  private async finalizeSessionWithoutResult(): Promise<void> {
+  private async finalizeSessionWithoutResult(isFailure: boolean = false): Promise<void> {
     if (!this.initialMessageTs) return;
     
     try {
@@ -787,11 +803,11 @@ export class SlackOutput {
         this.client.reactions.remove(removePayload)
       );
       
-      // Add completion emoji (checkmark since no explicit failure)
+      // Add completion emoji (warning for failures, checkmark for neutral completion)
       const addPayload = {
         channel: this.config.channel,
         timestamp: this.initialMessageTs,
-        name: 'white_check_mark'
+        name: isFailure ? 'warning' : 'white_check_mark'
       };
       
       this.logSlackCall('reactions.add', addPayload);
