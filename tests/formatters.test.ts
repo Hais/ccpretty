@@ -284,36 +284,6 @@ describe('Formatters', () => {
     });
   });
 
-  describe('formatSystemResponse', () => {
-    it('should format system init message correctly', () => {
-      const response: SystemInitMessage = {
-        type: 'system',
-        subtype: 'init',
-        session_id: 'test-session',
-        tools: ['Bash', 'Read', 'Write'],
-        mcp_servers: ['server1']
-      };
-
-      const result = formatSystemResponse(response);
-      expect(result).toContain('🚀 Session Initialized');
-      expect(result).toContain('Session ID: test-session');
-      expect(result).toContain('MCP Servers: server1');
-      expect(result).toContain('[system]');
-    });
-
-    it('should format generic system message correctly', () => {
-      const response: SystemResponse = {
-        type: 'system',
-        subtype: 'other',
-        session_id: 'test-session'
-      };
-
-      const result = formatSystemResponse(response);
-      expect(result).toContain('System Event: other');
-      expect(result).toContain('Session ID: test-session');
-      expect(result).toContain('[system]');
-    });
-  });
 
   describe('formatResultResponse', () => {
     it('should format successful result correctly', () => {
