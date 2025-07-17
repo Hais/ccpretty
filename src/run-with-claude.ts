@@ -1,7 +1,5 @@
-import { spawn, SpawnOptions } from 'child_process';
-import { createWriteStream, promises as fs } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { query } from '@anthropic-ai/claude-code';
+import type { SDKOptions } from './models';
 import { InputParser } from './input-parser';
 // Removed MessageQueue and MessageReducer dependencies
 import { TerminalOutput } from './terminal-output';
@@ -18,64 +16,56 @@ export interface RunWithClaudeOptions {
   };
   /** Debug mode - logs additional information */
   debug?: boolean;
-  /** Custom temporary directory for logs */
-  tempDir?: string;
   /** Timeout in milliseconds for Claude Code execution */
   timeout?: number;
+  /** SDK options passed to Claude Code query() */
+  sdkOptions?: SDKOptions;
 }
 
 export interface RunWithClaudeResult {
-  /** Exit code from Claude Code process */
-  exitCode: number;
   /** Whether Claude Code completed successfully */
   success: boolean;
-  /** Raw output from Claude Code */
-  rawOutput: string;
   /** Formatted output from ccpretty */
   formattedOutput: string;
-  /** Path to temporary log file (for debugging) */
-  tempLogPath?: string;
   /** Any errors that occurred during processing */
   errors: string[];
+  /** Final session statistics from result message */
+  sessionStats?: {
+    duration_ms: number;
+    duration_api_ms: number;
+    num_turns: number;
+    total_cost_usd: number;
+    is_error: boolean;
+  };
 }
 
 /**
- * Run Claude Code with ccpretty formatting and handle crashes gracefully.
- * This function mimics the behavior of run-with-claude.sh script.
+ * Run Claude Code with ccpretty formatting using the official SDK.
  * 
- * @param command - Command array to execute (e.g., ['claude', 'ask', 'hello'])
+ * @param prompt - The prompt to send to Claude Code
  * @param options - Configuration options
  * @returns Promise resolving to execution result
  */
 export async function runWithClaude(
-  command: string[],
+  prompt: string,
   options: RunWithClaudeOptions = {}
 ): Promise<RunWithClaudeResult> {
   const {
     useQueue = false,
     slack,
     debug = false,
-    tempDir = tmpdir(),
-    timeout = 300000 // 5 minutes default
+    timeout = 300000, // 5 minutes default
+    sdkOptions = {}
   } = options;
 
-  // Create temporary files
-  const tempLogPath = join(tempDir, `claude-${Date.now()}.log`);
-  const ccprettyLogPath = join(tempDir, `ccpretty-${Date.now()}.log`);
-  
   const result: RunWithClaudeResult = {
-    exitCode: 0,
     success: false,
-    rawOutput: '',
     formattedOutput: '',
-    tempLogPath: debug ? tempLogPath : undefined,
     errors: []
   };
 
   if (debug) {
-    console.log('Running Claude Code with ccpretty...');
-    console.log('Temp log:', tempLogPath);
-    console.log('ccpretty log:', ccprettyLogPath);
+    console.log('Running Claude Code with SDK...');
   }
 
   try {
@@ -88,57 +78,44 @@ export async function runWithClaude(
       }
     }
 
-    // Run Claude Code and capture output
-    const claudeResult = await runClaudeCode(command, tempLogPath, timeout);
-    result.exitCode = claudeResult.exitCode;
-    result.rawOutput = claudeResult.output;
+    // Set up abort controller for timeout
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, timeout);
 
-    if (claudeResult.exitCode === 0) {
-      if (debug) {
-        console.log('Claude Code completed successfully');
-      }
-    } else {
-      if (debug) {
-        console.log(`Claude Code crashed with exit code: ${claudeResult.exitCode}`);
-      }
-      result.errors.push(`Claude Code exited with code ${claudeResult.exitCode}`);
-    }
-
-    // Process output with ccpretty
     try {
-      const formattedOutput = await processWithCcpretty(
-        result.rawOutput,
+      // Run Claude Code using the SDK
+      const claudeQuery = query({
+        prompt,
+        abortController,
+        options: {
+          ...sdkOptions
+        }
+      });
+
+      // Process messages with ccpretty
+      const formattedOutput = await processWithCcprettySDK(
+        claudeQuery,
         { useQueue, slack: !!slack, debug }
       );
+
       result.formattedOutput = formattedOutput;
-      result.success = claudeResult.exitCode === 0;
+      result.success = true;
       
       if (debug) {
-        console.log('ccpretty processing completed successfully');
+        console.log('Claude Code SDK execution completed successfully');
       }
-    } catch (ccprettyError) {
-      const errorMsg = `ccpretty processing failed: ${ccprettyError}`;
-      result.errors.push(errorMsg);
-      if (debug) {
-        console.error(errorMsg);
-      }
+
+    } finally {
+      clearTimeout(timeoutId);
     }
 
   } catch (error) {
-    const errorMsg = `Execution failed: ${error}`;
+    const errorMsg = `SDK execution failed: ${error}`;
     result.errors.push(errorMsg);
     if (debug) {
       console.error(errorMsg);
-    }
-  } finally {
-    // Cleanup temporary files unless in debug mode
-    if (!debug) {
-      try {
-        await fs.unlink(tempLogPath).catch(() => {});
-        await fs.unlink(ccprettyLogPath).catch(() => {});
-      } catch {
-        // Ignore cleanup errors
-      }
     }
   }
 
@@ -146,70 +123,18 @@ export async function runWithClaude(
 }
 
 /**
- * Execute Claude Code command and capture output
+ * Process Claude Code SDK messages with ccpretty formatting
  */
-async function runClaudeCode(
-  command: string[],
-  outputPath: string,
-  timeout: number
-): Promise<{ exitCode: number; output: string }> {
-  return new Promise((resolve, reject) => {
-    const outputStream = createWriteStream(outputPath);
-    let output = '';
-
-    const spawnOptions: SpawnOptions = {
-      stdio: ['inherit', 'pipe', 'pipe']
-    };
-
-    const child = spawn(command[0], command.slice(1), spawnOptions);
-    
-    // Set up timeout
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Command timed out after ${timeout}ms`));
-    }, timeout);
-
-    // Capture stdout and stderr
-    child.stdout?.on('data', (data) => {
-      const chunk = data.toString();
-      output += chunk;
-      outputStream.write(chunk);
-    });
-
-    child.stderr?.on('data', (data) => {
-      const chunk = data.toString();
-      output += chunk;
-      outputStream.write(chunk);
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      outputStream.end();
-      resolve({ exitCode: code || 0, output });
-    });
-
-    child.on('error', (error) => {
-      clearTimeout(timeoutId);
-      outputStream.end();
-      reject(error);
-    });
-  });
-}
-
-/**
- * Process Claude Code output with ccpretty formatting
- */
-async function processWithCcpretty(
-  input: string,
+async function processWithCcprettySDK(
+  claudeQuery: AsyncGenerator<any>,
   options: { useQueue: boolean; slack: boolean; debug: boolean }
 ): Promise<string> {
   let formattedOutput = '';
   
   // Initialize components
-  const inputParser = new InputParser();
   const terminalOutput = new TerminalOutput();
   let slackOutput: SlackOutput | null = null;
-  // Queue functionality removed
+  let sessionStats: any = null;
 
   // Initialize Slack output if configured
   if (options.slack) {
@@ -221,119 +146,51 @@ async function processWithCcpretty(
     slackOutput = new SlackOutput(slack);
   }
 
-  // Initialize queue-based processing if enabled
-  if (options.useQueue) {
-    messageReducer = new MessageReducer();
-    messageQueue = new MessageQueue(async (groups: MessageGroup[]) => {
+  try {
+    // Process SDK messages
+    for await (const message of claudeQuery) {
       try {
-        if (!messageReducer) return;
-        
-        const reducedMessages = messageReducer.reduceGroups(groups);
-        
-        for (const reduced of reducedMessages) {
-          try {
-            // Capture terminal output
-            const originalLog = console.log;
-            const originalError = console.error;
-            let capturedOutput = '';
-            
-            console.log = (...args) => {
-              capturedOutput += args.join(' ') + '\n';
-            };
-            console.error = (...args) => {
-              capturedOutput += args.join(' ') + '\n';
-            };
-            
-            // Output to terminal
-            terminalOutput.output(message);
-            
-            // Restore console
-            console.log = originalLog;
-            console.error = originalError;
-            
-            formattedOutput += capturedOutput;
-            
-            // Output to Slack if configured
-            if (slackOutput) {
-              await slackOutput.output(message);
-            }
-          } catch (error) {
-            if (options.debug) {
-              console.warn(`Failed to process message: ${error}`);
-            }
-          }
+        // Store session stats from result messages
+        if (message.type === 'result') {
+          sessionStats = message;
         }
-      } catch (error) {
-        if (options.debug) {
-          console.warn(`Failed to process queue: ${error}`);
-        }
-      }
-    });
-    
-    messageQueue.start();
-  }
 
-  // Process input line by line
-  const lines = input.split('\n');
-  for (const line of lines) {
-    if (line.trim()) {
-      try {
-        const messages = inputParser.parseLine(line);
+        // Capture terminal output
+        const originalLog = console.log;
+        const originalError = console.error;
+        let capturedOutput = '';
         
-        for (const message of messages) {
-          if (options.useQueue && messageQueue) {
-            // Queue-based processing
-            messageQueue.enqueue(message);
-          } else {
-            // Direct processing
-            const reduced = {
-              message,
-              metadata: {
-                type: 'single' as const,
-                originalCount: 1
-              }
-            };
-            
-            // Capture terminal output
-            const originalLog = console.log;
-            const originalError = console.error;
-            let capturedOutput = '';
-            
-            console.log = (...args) => {
-              capturedOutput += args.join(' ') + '\n';
-            };
-            console.error = (...args) => {
-              capturedOutput += args.join(' ') + '\n';
-            };
-            
-            // Output to terminal
-            terminalOutput.output(message);
-            
-            // Restore console
-            console.log = originalLog;
-            console.error = originalError;
-            
-            formattedOutput += capturedOutput;
-            
-            // Output to Slack if configured
-            if (slackOutput) {
-              await slackOutput.output(message);
-            }
-          }
+        console.log = (...args) => {
+          capturedOutput += args.join(' ') + '\n';
+        };
+        console.error = (...args) => {
+          capturedOutput += args.join(' ') + '\n';
+        };
+        
+        // Output to terminal
+        terminalOutput.output(message);
+        
+        // Restore console
+        console.log = originalLog;
+        console.error = originalError;
+        
+        formattedOutput += capturedOutput;
+        
+        // Output to Slack if configured
+        if (slackOutput) {
+          await slackOutput.output(message);
         }
       } catch (error) {
         if (options.debug) {
-          console.warn(`Failed to process line: ${error}`);
+          console.warn(`Failed to process message: ${error}`);
         }
       }
     }
-  }
-
-  // Finalize queue processing
-  if (messageQueue) {
-    // Give the queue a moment to process any final messages
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    messageQueue.stop();
+  } catch (error) {
+    if (options.debug) {
+      console.warn(`Failed to process SDK messages: ${error}`);
+    }
+    throw error;
   }
 
   // Wait for Slack completion
@@ -343,3 +200,4 @@ async function processWithCcpretty(
 
   return formattedOutput;
 }
+
