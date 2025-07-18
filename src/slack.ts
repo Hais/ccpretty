@@ -47,7 +47,7 @@ export function isSignificantEvent(data: LogEntry): boolean {
     }
     
     // Assistant messages with text content (no tool use)
-    if (isAssistantResponse(data) && data.message?.type === 'message') {
+    if (isAssistantResponse(data) && data.message) {
       const content = data.message.content;
       if (!Array.isArray(content)) return false;
       
@@ -160,13 +160,13 @@ export function createSlackMessage(data: LogEntry): string {
     const isSuccess = data.subtype === 'success' && !data.is_error;
     const icon = isSuccess ? '✅' : '❌';
     const status = isSuccess ? 'Completed' : 'Failed';
-    return `${icon} *Task ${status}*\nDuration: ${(data.duration_ms / 1000).toFixed(2)}s | Cost: $${data.cost_usd.toFixed(4)} USD`;
+    return `${icon} *Task ${status}*\nDuration: ${(data.duration_ms / 1000).toFixed(2)}s | Cost: $${data.total_cost_usd.toFixed(4)} USD`;
   }
   
   if (isAssistantResponse(data)) {
     const content = data.message.content;
-    const toolUses = content.filter(c => isToolUseContent(c)) as any[];
-    const textContent = content.filter(c => isTextContent(c)) as any[];
+    const toolUses = Array.isArray(content) ? content.filter(c => isToolUseContent(c)) as any[] : [];
+    const textContent = Array.isArray(content) ? content.filter(c => isTextContent(c)) as any[] : [];
     
     // Handle tool use messages
     if (toolUses.length > 0) {
@@ -334,7 +334,7 @@ export function createSlackBlocks(data: LogEntry): any[] {
           },
           {
             type: "mrkdwn",
-            text: `*Cost:*\n$${data.cost_usd.toFixed(4)} USD`
+            text: `*Cost:*\n$${data.total_cost_usd.toFixed(4)} USD`
           },
           {
             type: "mrkdwn",
@@ -351,8 +351,8 @@ export function createSlackBlocks(data: LogEntry): any[] {
   
   if (isAssistantResponse(data)) {
     const content = data.message.content;
-    const toolUses = content.filter(c => isToolUseContent(c)) as any[];
-    const textContent = content.filter(c => isTextContent(c)) as any[];
+    const toolUses = Array.isArray(content) ? content.filter(c => isToolUseContent(c)) as any[] : [];
+    const textContent = Array.isArray(content) ? content.filter(c => isTextContent(c)) as any[] : [];
     
     // Handle tool use messages
     if (toolUses.length > 0) {
@@ -555,7 +555,7 @@ export function createSlackBlocks(data: LogEntry): any[] {
   
   // Handle tool results
   if (isUserResponse(data)) {
-    const toolResults = data.message.content.filter(c => isToolResultContent(c)) as any[];
+    const toolResults = Array.isArray(data.message.content) ? data.message.content.filter(c => isToolResultContent(c)) as any[] : [];
     if (toolResults.length > 0) {
       // This will be handled by updating existing tool_use messages
       return [];

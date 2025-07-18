@@ -35,13 +35,13 @@ export function formatAssistantResponse(response: AssistantResponse): string {
     if (isTextContent(content)) {
       lines.push(pc.white(content.text));
     } else if (isToolUseContent(content)) {
-      if (content.name === 'TodoWrite' && content.input.todos) {
+      if (content.name === 'TodoWrite' && (content.input as any).todos) {
         // Special formatting for TodoWrite
         lines.push(`${pc.yellow('Tool:')} ${content.name}`);
         lines.push('');
         lines.push(pc.bold('📝 Todo List:'));
         
-        for (const todo of content.input.todos) {
+        for (const todo of (content.input as any).todos) {
           const statusIcon = todo.status === 'completed' ? '✅' : 
                            todo.status === 'in_progress' ? '🔄' : '⏳';
           const priorityColor = todo.priority === 'high' ? pc.red : 
@@ -56,33 +56,33 @@ export function formatAssistantResponse(response: AssistantResponse): string {
         let toolInfo = `${pc.yellow('Tool:')} ${content.name}`;
         
         // Add file path if present
-        if (content.input.file_path) {
-          const trimmedPath = trimFilePath(content.input.file_path);
+        if ((content.input as any).file_path) {
+          const trimmedPath = trimFilePath((content.input as any).file_path);
           toolInfo += `\n${pc.dim('File:')} ${trimmedPath}`;
         }
         
         // Add other parameters
-        if (content.input.command) {
-          toolInfo += `\n${pc.dim('Command:')} ${content.input.command}`;
-        } else if (!content.input.file_path) {
+        if ((content.input as any).command) {
+          toolInfo += `\n${pc.dim('Command:')} ${(content.input as any).command}`;
+        } else if (!(content.input as any).file_path) {
           toolInfo += `\n${pc.dim('Command:')} N/A`;
         }
         
-        if (content.input.description) {
-          toolInfo += `\n${pc.dim('Description:')} ${content.input.description}`;
-        } else if (!content.input.file_path) {
+        if ((content.input as any).description) {
+          toolInfo += `\n${pc.dim('Description:')} ${(content.input as any).description}`;
+        } else if (!(content.input as any).file_path) {
           toolInfo += `\n${pc.dim('Description:')} N/A`;
         }
         
         // Add other relevant parameters
-        if (content.input.pattern) {
-          toolInfo += `\n${pc.dim('Pattern:')} ${content.input.pattern}`;
+        if ((content.input as any).pattern) {
+          toolInfo += `\n${pc.dim('Pattern:')} ${(content.input as any).pattern}`;
         }
-        if (content.input.limit && typeof content.input.limit === 'number') {
-          toolInfo += `\n${pc.dim('Limit:')} ${content.input.limit} lines`;
+        if ((content.input as any).limit && typeof (content.input as any).limit === 'number') {
+          toolInfo += `\n${pc.dim('Limit:')} ${(content.input as any).limit} lines`;
         }
-        if (content.input.offset && typeof content.input.offset === 'number') {
-          toolInfo += `\n${pc.dim('Offset:')} ${content.input.offset}`;
+        if ((content.input as any).offset && typeof (content.input as any).offset === 'number') {
+          toolInfo += `\n${pc.dim('Offset:')} ${(content.input as any).offset}`;
         }
         
         lines.push(toolInfo);
@@ -91,7 +91,7 @@ export function formatAssistantResponse(response: AssistantResponse): string {
   }
   
   // Add metadata
-  const metadata = pc.dim(`[${msg.model} | ${msg.usage.output_tokens} tokens | ${msg.ttftMs}ms]`);
+  const metadata = pc.dim(`[${msg.model} | ${msg.usage.output_tokens} tokens]`);
   lines.push(metadata);
   
   // Wrap everything in a box with "assistant" as the title
@@ -174,17 +174,7 @@ export function formatSystemResponse(response: SystemResponse): string {
     }
     
     if (response.mcp_servers.length > 0) {
-      lines.push(`${pc.dim('MCP Servers:')} ${response.mcp_servers.join(', ')}`);
-    }
-  } else {
-    // Generic system message
-    lines.push(`${pc.bold('System Event:')} ${response.subtype}`);
-    
-    const sessionDisplay = formatSessionDisplay(response.session_id);
-    if (sessionDisplay.isLink) {
-      lines.push(`${pc.dim('GitHub Actions Run:')} ${pc.cyan(sessionDisplay.text)}`);
-    } else {
-      lines.push(`${pc.dim('Session ID:')} ${sessionDisplay.text}`);
+      lines.push(`${pc.dim('MCP Servers:')} ${response.mcp_servers.map(s => s.name).join(', ')}`);
     }
   }
   

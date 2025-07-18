@@ -157,7 +157,7 @@ export class SlackOutput {
     const tools = 'tools' in response ? response.tools : [];
     
     // Create the initial session message without tools
-    const sessionDisplay = formatSessionDisplay(this.sessionId);
+    const sessionDisplay = formatSessionDisplay(this.sessionId || '');
     let text: string;
     
     if (sessionDisplay.isLink) {
@@ -838,7 +838,7 @@ export class SlackOutput {
     const contents = response.message?.content || [];
     
     // Check if this contains tool results
-    const toolResults = contents.filter((c: any) => c.type === 'tool_result');
+    const toolResults = Array.isArray(contents) ? contents.filter((c: any) => c.type === 'tool_result') : [];
     
     if (toolResults.length === 0) {
       return; // Skip user messages without tool results

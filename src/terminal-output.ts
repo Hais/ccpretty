@@ -155,7 +155,7 @@ export class TerminalOutput {
     output += `${statusIcon} Task ${status}\n\n`;
     
     // Add the result text if it exists
-    if (typeof response.result === 'string' && response.result.trim()) {
+    if ('result' in response && typeof response.result === 'string' && response.result.trim()) {
       output += `${response.result}\n\n`;
     }
     
